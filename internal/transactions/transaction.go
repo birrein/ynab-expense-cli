@@ -34,31 +34,39 @@ type PostTransactionRequest struct {
 }
 
 func BuildExpense(input Input) Transaction {
+	accountID := strings.TrimSpace(input.AccountID)
+	date := strings.TrimSpace(input.Date)
+	payeeName := strings.TrimSpace(input.PayeeName)
+	categoryID := strings.TrimSpace(input.CategoryID)
 	memo := AuditMemo(input.Memo)
 	transaction := Transaction{
-		AccountID: input.AccountID,
-		Date:      input.Date,
+		AccountID: accountID,
+		Date:      date,
 		Amount:    input.AmountMilliunits,
-		PayeeName: input.PayeeName,
+		PayeeName: payeeName,
 		Memo:      memo,
 		Cleared:   "uncleared",
 		Approved:  false,
-		ImportID:  StableImportID(input.AccountID, input.Date, input.AmountMilliunits, input.PayeeName, memo),
+		ImportID:  StableImportID(accountID, date, input.AmountMilliunits, payeeName, memo),
 	}
 
-	if input.CategoryID != "" {
-		transaction.CategoryID = &input.CategoryID
+	if categoryID != "" {
+		transaction.CategoryID = &categoryID
 	}
 
 	return transaction
 }
 
 func AuditMemo(memo string) string {
-	if memo == "" {
+	cleaned := strings.TrimSpace(memo)
+	if cleaned == "" {
 		return SourceMemo
 	}
+	if strings.Contains(cleaned, SourceMemo) {
+		return cleaned
+	}
 
-	return memo + "; " + SourceMemo
+	return cleaned + "; " + SourceMemo
 }
 
 func StableImportID(accountID string, date string, amount int64, payee string, memo string) string {
