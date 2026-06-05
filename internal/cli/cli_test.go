@@ -91,6 +91,12 @@ func TestAuthSetTokenRejectsPositionalToken(t *testing.T) {
 	if err == nil {
 		t.Fatal("auth set-token accepted a positional token")
 	}
+	if strings.Contains(err.Error(), "secret-token") {
+		t.Fatalf("auth set-token error included positional token: %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "auth set-token does not accept token arguments") {
+		t.Fatalf("expected sanitized positional token error, got %q", err.Error())
+	}
 	if store.token != "" {
 		t.Fatalf("positional token should not be stored, got %q", store.token)
 	}

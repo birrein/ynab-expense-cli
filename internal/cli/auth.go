@@ -27,7 +27,12 @@ func (a *App) newAuthSetTokenCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set-token",
 		Short: "Store a YNAB API token",
-		Args:  cobra.NoArgs,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) > 0 {
+				return fmt.Errorf("auth set-token does not accept token arguments; use the secure prompt or --token-stdin")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var token string
 			if tokenStdin {
