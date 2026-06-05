@@ -209,6 +209,40 @@ func TestKeychainStoreSetDoesNotPassTokenInProcessArgs(t *testing.T) {
 	}
 }
 
+func TestKeychainStoreGetMapsMissingItemToTokenNotFound(t *testing.T) {
+	runner := func(context.Context, string, string, ...string) ([]byte, error) {
+		return []byte("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n"), errors.New("exit status 44")
+	}
+	store := KeychainStore{Account: "tester", Service: "ynab-expense", Run: runner}
+
+	token, err := store.Get(context.Background())
+	if !errors.Is(err, ErrTokenNotFound) {
+		t.Fatalf("Get err = %v, want %v", err, ErrTokenNotFound)
+	}
+	if token != "" {
+		t.Fatalf("Get token = %q, want empty", token)
+	}
+}
+
+func TestResolverTreatsMissingKeychainItemAsNotConfigured(t *testing.T) {
+	t.Setenv("YNAB_API_TOKEN", "")
+	runner := func(context.Context, string, string, ...string) ([]byte, error) {
+		return []byte("security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.\n"), errors.New("exit status 44")
+	}
+	store := KeychainStore{Account: "tester", Service: "ynab-expense", Run: runner}
+
+	token, source, err := Resolver{Store: store}.Token(context.Background())
+	if !errors.Is(err, ErrTokenNotFound) {
+		t.Fatalf("Token err = %v, want %v", err, ErrTokenNotFound)
+	}
+	if token != "" {
+		t.Fatalf("Token token = %q, want empty", token)
+	}
+	if source != SourceNone {
+		t.Fatalf("Token source = %q, want %q", source, SourceNone)
+	}
+}
+
 func TestKeychainStoreRefusesEmptyAccount(t *testing.T) {
 	called := false
 	runner := func(context.Context, string, string, ...string) ([]byte, error) {

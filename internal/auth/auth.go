@@ -84,6 +84,9 @@ func (s KeychainStore) Get(ctx context.Context) (string, error) {
 
 	output, err := s.runner()(ctx, "/usr/bin/security", "", "find-generic-password", "-a", s.Account, "-s", s.service(), "-w")
 	if err != nil {
+		if isMissingKeychainItem(output) {
+			return "", ErrTokenNotFound
+		}
 		return "", err
 	}
 	return strings.TrimSpace(string(output)), nil
@@ -122,9 +125,13 @@ func (s KeychainStore) validate() error {
 func runCommand(ctx context.Context, name string, input string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if input == "" {
-		return cmd.Output()
+		return cmd.CombinedOutput()
 	}
 	return runCommandWithPTY(cmd, input)
+}
+
+func isMissingKeychainItem(output []byte) bool {
+	return strings.Contains(strings.ToLower(string(output)), "specified item could not be found in the keychain")
 }
 
 func runCommandWithPTY(cmd *exec.Cmd, input string) ([]byte, error) {
