@@ -1,0 +1,5 @@
+.DS_Store
+ynab-expense
+dist/
+bin/
+coverage.out
