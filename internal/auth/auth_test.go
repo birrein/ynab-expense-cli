@@ -37,6 +37,23 @@ func TestResolverPrefersEnvironmentToken(t *testing.T) {
 	}
 }
 
+func TestResolverTrimsEnvironmentToken(t *testing.T) {
+	t.Setenv("YNAB_API_TOKEN", "  from-env  ")
+
+	resolver := Resolver{Store: fakeStore{token: "from-keychain"}}
+
+	token, source, err := resolver.Token(context.Background())
+	if err != nil {
+		t.Fatalf("Token returned error: %v", err)
+	}
+	if token != "from-env" {
+		t.Fatalf("Token token = %q, want %q", token, "from-env")
+	}
+	if source != SourceEnv {
+		t.Fatalf("Token source = %q, want %q", source, SourceEnv)
+	}
+}
+
 func TestResolverFallsBackToKeychain(t *testing.T) {
 	t.Setenv("YNAB_API_TOKEN", "")
 
@@ -54,10 +71,44 @@ func TestResolverFallsBackToKeychain(t *testing.T) {
 	}
 }
 
+func TestResolverReturnsNotFoundWithNilStore(t *testing.T) {
+	t.Setenv("YNAB_API_TOKEN", "")
+
+	resolver := Resolver{}
+
+	token, source, err := resolver.Token(context.Background())
+	if !errors.Is(err, ErrTokenNotFound) {
+		t.Fatalf("Token err = %v, want %v", err, ErrTokenNotFound)
+	}
+	if token != "" {
+		t.Fatalf("Token token = %q, want empty", token)
+	}
+	if source != SourceNone {
+		t.Fatalf("Token source = %q, want %q", source, SourceNone)
+	}
+}
+
 func TestResolverReturnsNotFoundWhenKeychainMissing(t *testing.T) {
 	t.Setenv("YNAB_API_TOKEN", " ")
 
 	resolver := Resolver{Store: fakeStore{err: errors.New("missing")}}
+
+	token, source, err := resolver.Token(context.Background())
+	if !errors.Is(err, ErrTokenNotFound) {
+		t.Fatalf("Token err = %v, want %v", err, ErrTokenNotFound)
+	}
+	if token != "" {
+		t.Fatalf("Token token = %q, want empty", token)
+	}
+	if source != SourceNone {
+		t.Fatalf("Token source = %q, want %q", source, SourceNone)
+	}
+}
+
+func TestResolverReturnsNotFoundWhenKeychainTokenEmpty(t *testing.T) {
+	t.Setenv("YNAB_API_TOKEN", "")
+
+	resolver := Resolver{Store: fakeStore{token: "  \n\t  "}}
 
 	token, source, err := resolver.Token(context.Background())
 	if !errors.Is(err, ErrTokenNotFound) {
