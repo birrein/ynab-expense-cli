@@ -1,5 +1,5 @@
 .DS_Store
-ynab-expense
+/ynab-expense
 dist/
 bin/
 coverage.out
