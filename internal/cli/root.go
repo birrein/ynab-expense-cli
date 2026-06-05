@@ -36,6 +36,8 @@ type cliDeps struct {
 	tokenResolver     tokenResolver
 	tokenStore        tokenStore
 	ynabClientFactory func(token string) ynabClient
+	promptToken       func() (string, error)
+	stdin             io.Reader
 	stdinFD           func() int
 }
 
@@ -47,6 +49,7 @@ func NewRootCommand(out io.Writer, errOut io.Writer) *cobra.Command {
 		ynabClientFactory: func(token string) ynabClient {
 			return ynab.NewClient("", token, (*http.Client)(nil))
 		},
+		stdin: os.Stdin,
 		stdinFD: func() int {
 			return int(os.Stdin.Fd())
 		},
@@ -54,6 +57,12 @@ func NewRootCommand(out io.Writer, errOut io.Writer) *cobra.Command {
 }
 
 func newRootCommandWithDeps(out io.Writer, errOut io.Writer, deps cliDeps) *cobra.Command {
+	if deps.stdin == nil {
+		deps.stdin = os.Stdin
+	}
+	if deps.promptToken == nil && deps.stdinFD != nil {
+		deps.promptToken = terminalPrompt(errOut, deps.stdinFD)
+	}
 	app := &App{out: out, err: errOut, deps: deps}
 
 	cmd := &cobra.Command{

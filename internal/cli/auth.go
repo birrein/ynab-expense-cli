@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/birrein/ynab-expense-cli/internal/auth"
@@ -22,18 +23,29 @@ func (a *App) newAuthCommand() *cobra.Command {
 }
 
 func (a *App) newAuthSetTokenCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "set-token [token]",
+	var tokenStdin bool
+	cmd := &cobra.Command{
+		Use:   "set-token",
 		Short: "Store a YNAB API token",
-		Args:  cobra.MaximumNArgs(1),
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			token := ""
-			if len(args) == 1 {
-				token = args[0]
-			} else {
-				prompted, err := a.promptToken()
+			var token string
+			if tokenStdin {
+				if a.deps.stdin == nil {
+					return fmt.Errorf("stdin is not configured")
+				}
+				tokenBytes, err := io.ReadAll(a.deps.stdin)
 				if err != nil {
-					return err
+					return fmt.Errorf("read token from stdin: %w", err)
+				}
+				token = string(tokenBytes)
+			} else {
+				if a.deps.promptToken == nil {
+					return fmt.Errorf("terminal token prompt is not configured")
+				}
+				prompted, err := a.deps.promptToken()
+				if err != nil {
+					return fmt.Errorf("read token from terminal: %w", err)
 				}
 				token = prompted
 			}
@@ -53,21 +65,20 @@ func (a *App) newAuthSetTokenCommand() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&tokenStdin, "token-stdin", false, "Read the YNAB API token from stdin")
+	return cmd
 }
 
-func (a *App) promptToken() (string, error) {
-	stdinFD := a.deps.stdinFD
-	if stdinFD == nil {
-		return "", fmt.Errorf("stdin is not configured")
+func terminalPrompt(errOut io.Writer, stdinFD func() int) func() (string, error) {
+	return func() (string, error) {
+		fmt.Fprint(errOut, "YNAB API token: ")
+		tokenBytes, err := term.ReadPassword(stdinFD())
+		fmt.Fprintln(errOut)
+		if err != nil {
+			return "", err
+		}
+		return string(tokenBytes), nil
 	}
-
-	fmt.Fprint(a.err, "YNAB API token: ")
-	tokenBytes, err := term.ReadPassword(stdinFD())
-	fmt.Fprintln(a.err)
-	if err != nil {
-		return "", err
-	}
-	return string(tokenBytes), nil
 }
 
 func (a *App) newAuthStatusCommand() *cobra.Command {
