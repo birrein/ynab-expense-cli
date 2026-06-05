@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/user"
@@ -36,7 +37,10 @@ func (r Resolver) Token(ctx context.Context) (token string, source string, err e
 
 	token, err = r.Store.Get(ctx)
 	if err != nil {
-		return "", SourceNone, ErrTokenNotFound
+		if errors.Is(err, ErrTokenNotFound) {
+			return "", SourceNone, ErrTokenNotFound
+		}
+		return "", SourceNone, err
 	}
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -46,7 +50,7 @@ func (r Resolver) Token(ctx context.Context) (token string, source string, err e
 	return token, SourceKeychain, nil
 }
 
-type Runner func(ctx context.Context, name string, args ...string) ([]byte, error)
+type Runner func(ctx context.Context, name string, input string, args ...string) ([]byte, error)
 
 type KeychainStore struct {
 	Account string
@@ -63,14 +67,22 @@ func NewKeychainStore() KeychainStore {
 	return KeychainStore{
 		Account: account,
 		Service: DefaultService,
-		Run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
-			return exec.CommandContext(ctx, name, args...).Output()
+		Run: func(ctx context.Context, name string, input string, args ...string) ([]byte, error) {
+			cmd := exec.CommandContext(ctx, name, args...)
+			if input != "" {
+				cmd.Stdin = strings.NewReader(input)
+			}
+			return cmd.Output()
 		},
 	}
 }
 
 func (s KeychainStore) Get(ctx context.Context) (string, error) {
-	output, err := s.runner()(ctx, "/usr/bin/security", "find-generic-password", "-a", s.Account, "-s", s.service(), "-w")
+	if err := s.validate(); err != nil {
+		return "", err
+	}
+
+	output, err := s.runner()(ctx, "/usr/bin/security", "", "find-generic-password", "-a", s.Account, "-s", s.service(), "-w")
 	if err != nil {
 		return "", err
 	}
@@ -78,7 +90,11 @@ func (s KeychainStore) Get(ctx context.Context) (string, error) {
 }
 
 func (s KeychainStore) Set(ctx context.Context, token string) error {
-	_, err := s.runner()(ctx, "/usr/bin/security", "add-generic-password", "-U", "-a", s.Account, "-s", s.service(), "-w", token)
+	if err := s.validate(); err != nil {
+		return err
+	}
+
+	_, err := s.runner()(ctx, "/usr/bin/security", token+"\n", "add-generic-password", "-U", "-a", s.Account, "-s", s.service(), "-w")
 	return err
 }
 
@@ -94,4 +110,11 @@ func (s KeychainStore) service() string {
 		return s.Service
 	}
 	return DefaultService
+}
+
+func (s KeychainStore) validate() error {
+	if s.Account == "" {
+		return fmt.Errorf("keychain account is required")
+	}
+	return nil
 }
