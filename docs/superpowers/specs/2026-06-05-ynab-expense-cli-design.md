@@ -49,7 +49,19 @@ Do not add a Go Keychain dependency in the MVP. On macOS, store tokens by invoki
 
 `internal/ynab` owns the HTTP client for `https://api.ynab.com/v1`, JSON request/response handling, and readable API errors. The base URL must be configurable for tests.
 
-`internal/money` owns amount parsing and conversion to YNAB milliunits. MVP amount inputs include `12.990`, `$12.990`, and `12990`, which all represent a CLP expense of 12,990 and become `-12990000` milliunits when used by `add`. The MVP `add` command only creates expenses, so parsed amounts are stored as negative milliunits. Inflows are outside the MVP.
+`internal/money` owns currency-aware amount parsing and conversion to YNAB milliunits. Milliunits are YNAB's universal amount format across currencies; the selected currency only controls how the CLI interprets the input string before conversion.
+
+The MVP supports `--currency CLP` and `--currency USD`. `CLP` is the default because the primary budget is Chilean pesos. Examples:
+
+```text
+CLP: "$12.990", "12.990", "12990" => -12990000
+USD: "$12.99", "12.99" => -12990
+USD: "12990" => -12990000
+```
+
+For USD, an input without a decimal separator means whole dollars, not cents. This avoids guessing that could silently create the wrong transaction amount.
+
+The MVP `add` command only creates expenses, so parsed amounts are stored as negative milliunits. Inflows are outside the MVP.
 
 `internal/transactions` owns building safe transaction payloads, including defaults and stable `import_id` generation.
 
@@ -64,7 +76,7 @@ ynab-expense budgets
 ynab-expense accounts --budget default
 ynab-expense categories --budget default
 ynab-expense transactions --budget default --since YYYY-MM-DD
-ynab-expense add --budget default --account-id ... --amount 12.990 --payee "Comercio" --date YYYY-MM-DD --dry-run
+ynab-expense add --budget default --account-id ... --amount 12.990 --currency CLP --payee "Comercio" --date YYYY-MM-DD --dry-run
 ynab-expense add ... --commit
 ```
 
@@ -154,6 +166,7 @@ Use TDD for implementation.
 Unit tests must cover:
 
 - CLP amount parsing to milliunits
+- USD amount parsing to milliunits
 - transaction payload defaults
 - memo audit marker behavior
 - stable `import_id`
