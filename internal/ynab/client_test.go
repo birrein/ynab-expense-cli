@@ -11,6 +11,17 @@ import (
 	"github.com/birrein/ynab-expense-cli/internal/transactions"
 )
 
+func TestNewClientUsesDefaultBaseURLAndHTTPClient(t *testing.T) {
+	client := NewClient("", "token-123", nil)
+
+	if client.baseURL != DefaultBaseURL {
+		t.Fatalf("baseURL = %q, want %q", client.baseURL, DefaultBaseURL)
+	}
+	if client.httpClient == nil {
+		t.Fatal("httpClient = nil, want non-nil default client")
+	}
+}
+
 func TestClientGetPlansUsesAuthHeader(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/plans" {
@@ -32,6 +43,77 @@ func TestClientGetPlansUsesAuthHeader(t *testing.T) {
 
 	if !strings.Contains(string(body), "Main") {
 		t.Fatalf("body = %s, want it to contain Main", body)
+	}
+}
+
+func TestClientGetAccountsUsesPathAndAcceptHeader(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/plans/default/accounts" {
+			t.Fatalf("path = %q, want /plans/default/accounts", r.URL.Path)
+		}
+		if got := r.Header.Get("Accept"); got != "application/json" {
+			t.Fatalf("Accept = %q, want application/json", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"accounts":[]}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-123", server.Client())
+	_, err := client.GetAccounts(context.Background(), "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientGetAccountsTrimsTrailingSlashFromBaseURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/plans/default/accounts" {
+			t.Fatalf("path = %q, want /plans/default/accounts", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"accounts":[]}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL+"/", "token-123", server.Client())
+	_, err := client.GetAccounts(context.Background(), "default")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientGetAccountsEscapesBudgetPathSegment(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.EscapedPath() != "/plans/budget%2Fwith%2Fslash/accounts" {
+			t.Fatalf("escaped path = %q, want /plans/budget%%2Fwith%%2Fslash/accounts", r.URL.EscapedPath())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"accounts":[]}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-123", server.Client())
+	_, err := client.GetAccounts(context.Background(), "budget/with/slash")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientGetCategoriesUsesPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/plans/default/categories" {
+			t.Fatalf("path = %q, want /plans/default/categories", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"categories":[]}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-123", server.Client())
+	_, err := client.GetCategories(context.Background(), "default")
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -65,6 +147,9 @@ func TestClientCreateTransactionPostsPayload(t *testing.T) {
 		}
 		if r.URL.Path != "/plans/default/transactions" {
 			t.Fatalf("path = %q, want /plans/default/transactions", r.URL.Path)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
 		}
 		var payload transactions.PostTransactionRequest
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
