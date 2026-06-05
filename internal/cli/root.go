@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/birrein/ynab-expense-cli/internal/auth"
+	"github.com/birrein/ynab-expense-cli/internal/transactions"
 	"github.com/birrein/ynab-expense-cli/internal/ynab"
 	"github.com/spf13/cobra"
 )
@@ -30,6 +31,7 @@ type ynabClient interface {
 	GetAccounts(context.Context, string) ([]byte, error)
 	GetCategories(context.Context, string) ([]byte, error)
 	GetTransactions(context.Context, string, string, string) ([]byte, error)
+	CreateTransaction(context.Context, string, transactions.PostTransactionRequest) ([]byte, error)
 }
 
 type cliDeps struct {
@@ -79,6 +81,7 @@ func newRootCommandWithDeps(out io.Writer, errOut io.Writer, deps cliDeps) *cobr
 	cmd.AddCommand(app.newAccountsCommand())
 	cmd.AddCommand(app.newCategoriesCommand())
 	cmd.AddCommand(app.newTransactionsCommand())
+	cmd.AddCommand(app.newAddCommand())
 
 	return cmd
 }

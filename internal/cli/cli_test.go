@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/birrein/ynab-expense-cli/internal/auth"
+	"github.com/birrein/ynab-expense-cli/internal/transactions"
 	"github.com/spf13/cobra"
 )
 
@@ -263,6 +264,149 @@ func TestTransactionsForwardsFiltersAndWritesResponse(t *testing.T) {
 	}
 }
 
+func TestAddDryRunDoesNotRequireToken(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--budget", "default",
+		"--account-id", "account-123",
+		"--amount", "12.990",
+		"--currency", "CLP",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--dry-run",
+	)
+
+	if err != nil {
+		t.Fatalf("add dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"dry_run": true`,
+		`"amount": -12990000`,
+		`"source=ynab-expense-cli"`,
+		`"cleared": "uncleared"`,
+		`"approved": false`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("add dry-run output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestAddRejectsDryRunAndCommitTogether(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd,
+		"add",
+		"--account-id", "account-123",
+		"--amount", "12.990",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--dry-run",
+		"--commit",
+	)
+
+	if err == nil {
+		t.Fatal("add accepted --dry-run with --commit")
+	}
+	if !strings.Contains(err.Error(), "--dry-run cannot be used with --commit") {
+		t.Fatalf("expected dry-run/commit conflict error, got %q", err.Error())
+	}
+}
+
+func TestAddCommitRequiresToken(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: fakeTokenResolver{err: auth.ErrTokenNotFound},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--account-id", "account-123",
+		"--amount", "12.990",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--commit",
+	)
+
+	if err == nil {
+		t.Fatal("add --commit returned nil error without token")
+	}
+	if !strings.Contains(err.Error(), "No YNAB token found") {
+		t.Fatalf("expected missing-token error, got %q", err.Error())
+	}
+}
+
+func TestAddCommitSendsTransaction(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		createTransactionResponse: []byte(`{"data":{"transaction":{"id":"txn-123"}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd,
+		"add",
+		"--budget", "default",
+		"--account-id", "account-123",
+		"--amount", "12.990",
+		"--currency", "CLP",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--category-id", "category-123",
+		"--memo", "almuerzo",
+		"--commit",
+	)
+
+	if err != nil {
+		t.Fatalf("add --commit returned error: %v", err)
+	}
+	if client.createTransactionBudget != "default" {
+		t.Fatalf("expected budget default, got %q", client.createTransactionBudget)
+	}
+	transaction := client.createTransactionPayload.Transaction
+	if transaction.Amount != -12990000 {
+		t.Fatalf("expected amount -12990000, got %d", transaction.Amount)
+	}
+	if transaction.ImportID == "" {
+		t.Fatal("expected import_id to be set")
+	}
+	if transaction.Memo != "almuerzo; source=ynab-expense-cli" {
+		t.Fatalf("expected audit memo, got %q", transaction.Memo)
+	}
+	if transaction.CategoryID == nil || *transaction.CategoryID != "category-123" {
+		t.Fatalf("expected category category-123, got %#v", transaction.CategoryID)
+	}
+	if !strings.Contains(out.String(), `"txn-123"`) {
+		t.Fatalf("add --commit output did not include response JSON, got %q", out.String())
+	}
+}
+
+func TestAddDefaultsCurrencyToCLP(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd,
+		"add",
+		"--account-id", "account-123",
+		"--amount", "12.990",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+	)
+
+	if err != nil {
+		t.Fatalf("add dry-run with default currency returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"amount": -12990000`) {
+		t.Fatalf("expected CLP amount by default, got %q", out.String())
+	}
+}
+
 func commandWithFakeClient(out io.Writer, client ynabClient) *cobra.Command {
 	return newRootCommandWithDeps(out, out, cliDeps{
 		tokenResolver: fakeTokenResolver{token: "secret-token", source: auth.SourceEnv},
@@ -290,6 +434,15 @@ func (r fakeTokenResolver) Token(context.Context) (string, string, error) {
 	return r.token, r.source, nil
 }
 
+type failingTokenResolver struct {
+	t *testing.T
+}
+
+func (r failingTokenResolver) Token(context.Context) (string, string, error) {
+	r.t.Fatal("token resolver should not be called")
+	return "", auth.SourceNone, nil
+}
+
 type fakeTokenStore struct {
 	token string
 	err   error
@@ -304,17 +457,20 @@ func (s *fakeTokenStore) Set(_ context.Context, token string) error {
 }
 
 type fakeYNABClient struct {
-	plansResponse        []byte
-	plansCalled          bool
-	accountsBudget       string
-	accountsResponse     []byte
-	categoriesBudget     string
-	categoriesResponse   []byte
-	transactionsBudget   string
-	transactionsSince    string
-	transactionsUntil    string
-	transactionsResponse []byte
-	err                  error
+	plansResponse             []byte
+	plansCalled               bool
+	accountsBudget            string
+	accountsResponse          []byte
+	categoriesBudget          string
+	categoriesResponse        []byte
+	transactionsBudget        string
+	transactionsSince         string
+	transactionsUntil         string
+	transactionsResponse      []byte
+	createTransactionBudget   string
+	createTransactionPayload  transactions.PostTransactionRequest
+	createTransactionResponse []byte
+	err                       error
 }
 
 func (c *fakeYNABClient) GetPlans(context.Context) ([]byte, error) {
@@ -349,4 +505,13 @@ func (c *fakeYNABClient) GetTransactions(_ context.Context, budget string, since
 	c.transactionsSince = since
 	c.transactionsUntil = until
 	return c.transactionsResponse, nil
+}
+
+func (c *fakeYNABClient) CreateTransaction(_ context.Context, budget string, payload transactions.PostTransactionRequest) ([]byte, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.createTransactionBudget = budget
+	c.createTransactionPayload = payload
+	return c.createTransactionResponse, nil
 }
