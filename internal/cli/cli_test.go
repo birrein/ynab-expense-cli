@@ -352,12 +352,12 @@ func TestAddCommitSendsTransaction(t *testing.T) {
 
 	err := executeCommand(cmd,
 		"add",
-		"--budget", "default",
-		"--account-id", "account-123",
+		"--budget", " default ",
+		"--account-id", " account-123 ",
 		"--amount", "12.990",
 		"--currency", "CLP",
-		"--payee", "Comercio",
-		"--date", "2026-06-05",
+		"--payee", " Comercio ",
+		"--date", " 2026-06-05 ",
 		"--category-id", "category-123",
 		"--memo", "almuerzo",
 		"--commit",
@@ -370,6 +370,15 @@ func TestAddCommitSendsTransaction(t *testing.T) {
 		t.Fatalf("expected budget default, got %q", client.createTransactionBudget)
 	}
 	transaction := client.createTransactionPayload.Transaction
+	if transaction.AccountID != "account-123" {
+		t.Fatalf("expected account account-123, got %q", transaction.AccountID)
+	}
+	if transaction.PayeeName != "Comercio" {
+		t.Fatalf("expected payee Comercio, got %q", transaction.PayeeName)
+	}
+	if transaction.Date != "2026-06-05" {
+		t.Fatalf("expected date 2026-06-05, got %q", transaction.Date)
+	}
 	if transaction.Amount != -12990000 {
 		t.Fatalf("expected amount -12990000, got %d", transaction.Amount)
 	}
@@ -384,6 +393,119 @@ func TestAddCommitSendsTransaction(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"txn-123"`) {
 		t.Fatalf("add --commit output did not include response JSON, got %q", out.String())
+	}
+}
+
+func TestAddCommitRejectsBlankAccountIDBeforeTokenResolution(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--account-id", "   ",
+		"--amount", "12.990",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--commit",
+	)
+
+	if err == nil {
+		t.Fatal("add --commit accepted blank account-id")
+	}
+	if !strings.Contains(err.Error(), "--account-id is required") {
+		t.Fatalf("expected account-id required error, got %q", err.Error())
+	}
+}
+
+func TestAddCommitRejectsBlankPayeeBeforeTokenResolution(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--account-id", "account-123",
+		"--amount", "12.990",
+		"--payee", "   ",
+		"--date", "2026-06-05",
+		"--commit",
+	)
+
+	if err == nil {
+		t.Fatal("add --commit accepted blank payee")
+	}
+	if !strings.Contains(err.Error(), "--payee is required") {
+		t.Fatalf("expected payee required error, got %q", err.Error())
+	}
+}
+
+func TestAddCommitRejectsBlankBudgetBeforeTokenResolution(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--budget", "   ",
+		"--account-id", "account-123",
+		"--amount", "12.990",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--commit",
+	)
+
+	if err == nil {
+		t.Fatal("add --commit accepted blank budget")
+	}
+	if !strings.Contains(err.Error(), "--budget is required") {
+		t.Fatalf("expected budget required error, got %q", err.Error())
+	}
+}
+
+func TestAddCommitRejectsInvalidDateBeforeTokenResolution(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--account-id", "account-123",
+		"--amount", "12.990",
+		"--payee", "Comercio",
+		"--date", "not-a-date",
+		"--commit",
+	)
+
+	if err == nil {
+		t.Fatal("add --commit accepted invalid date")
+	}
+	if !strings.Contains(err.Error(), "--date must be YYYY-MM-DD") {
+		t.Fatalf("expected date format error, got %q", err.Error())
+	}
+}
+
+func TestAddDryRunRejectsInvalidDate(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd,
+		"add",
+		"--account-id", "account-123",
+		"--amount", "12.990",
+		"--payee", "Comercio",
+		"--date", "2026-02-31",
+	)
+
+	if err == nil {
+		t.Fatal("add dry-run accepted invalid date")
+	}
+	if !strings.Contains(err.Error(), "--date must be YYYY-MM-DD") {
+		t.Fatalf("expected date format error, got %q", err.Error())
 	}
 }
 

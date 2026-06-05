@@ -3,11 +3,24 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/birrein/ynab-expense-cli/internal/money"
 	"github.com/birrein/ynab-expense-cli/internal/transactions"
 	"github.com/spf13/cobra"
 )
+
+type addInput struct {
+	Budget     string
+	AccountID  string
+	Amount     string
+	Currency   string
+	Payee      string
+	Date       string
+	CategoryID string
+	Memo       string
+}
 
 func (a *App) newAddCommand() *cobra.Command {
 	var budget string
@@ -30,19 +43,33 @@ func (a *App) newAddCommand() *cobra.Command {
 				return fmt.Errorf("--dry-run cannot be used with --commit")
 			}
 
-			milliunits, err := money.ParseExpenseMilliunits(amount, currency)
+			input, err := validateAddInput(addInput{
+				Budget:     budget,
+				AccountID:  accountID,
+				Amount:     amount,
+				Currency:   currency,
+				Payee:      payee,
+				Date:       date,
+				CategoryID: categoryID,
+				Memo:       memo,
+			})
+			if err != nil {
+				return err
+			}
+
+			milliunits, err := money.ParseExpenseMilliunits(input.Amount, input.Currency)
 			if err != nil {
 				return err
 			}
 
 			payload := transactions.PostTransactionRequest{
 				Transaction: transactions.BuildExpense(transactions.Input{
-					AccountID:        accountID,
-					Date:             date,
+					AccountID:        input.AccountID,
+					Date:             input.Date,
 					AmountMilliunits: milliunits,
-					PayeeName:        payee,
-					CategoryID:       categoryID,
-					Memo:             memo,
+					PayeeName:        input.Payee,
+					CategoryID:       input.CategoryID,
+					Memo:             input.Memo,
 				}),
 			}
 
@@ -53,7 +80,7 @@ func (a *App) newAddCommand() *cobra.Command {
 					Payload transactions.PostTransactionRequest `json:"payload"`
 				}{
 					DryRun:  true,
-					Budget:  budget,
+					Budget:  input.Budget,
 					Payload: payload,
 				}, "", "  ")
 				if err != nil {
@@ -67,7 +94,7 @@ func (a *App) newAddCommand() *cobra.Command {
 				return err
 			}
 
-			body, err := client.CreateTransaction(cmd.Context(), budget, payload)
+			body, err := client.CreateTransaction(cmd.Context(), input.Budget, payload)
 			if err != nil {
 				return err
 			}
@@ -93,4 +120,31 @@ func (a *App) newAddCommand() *cobra.Command {
 	}
 
 	return cmd
+}
+
+func validateAddInput(input addInput) (addInput, error) {
+	input.Budget = strings.TrimSpace(input.Budget)
+	input.AccountID = strings.TrimSpace(input.AccountID)
+	input.Payee = strings.TrimSpace(input.Payee)
+	input.Date = strings.TrimSpace(input.Date)
+
+	if input.Budget == "" {
+		return addInput{}, fmt.Errorf("--budget is required")
+	}
+	if input.AccountID == "" {
+		return addInput{}, fmt.Errorf("--account-id is required")
+	}
+	if input.Payee == "" {
+		return addInput{}, fmt.Errorf("--payee is required")
+	}
+	if input.Date == "" {
+		return addInput{}, fmt.Errorf("--date is required")
+	}
+
+	parsedDate, err := time.Parse("2006-01-02", input.Date)
+	if err != nil || parsedDate.Format("2006-01-02") != input.Date {
+		return addInput{}, fmt.Errorf("--date must be YYYY-MM-DD")
+	}
+
+	return input, nil
 }
