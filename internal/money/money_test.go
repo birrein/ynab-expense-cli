@@ -51,3 +51,43 @@ func TestParseExpenseMilliunitsRejectsInvalidAmount(t *testing.T) {
 		t.Fatal("ParseExpenseMilliunits with invalid amount returned nil error")
 	}
 }
+
+func TestParseExpenseMilliunitsRejectsMalformedCLPAmounts(t *testing.T) {
+	cases := []string{
+		"",
+		"   ",
+		"-",
+		"+",
+		"12abc34",
+		"foo 12.990",
+		"12,34",
+		"1..2",
+		"1,2,3",
+	}
+
+	for _, input := range cases {
+		if _, err := ParseExpenseMilliunits(input, "CLP"); err == nil {
+			t.Fatalf("ParseExpenseMilliunits(%q, CLP) returned nil error", input)
+		}
+	}
+}
+
+func TestParseExpenseMilliunitsRejectsMalformedUSDAmounts(t *testing.T) {
+	cases := []string{
+		"",
+		"   ",
+		"-",
+		"+",
+		"12abc34",
+		"foo 12.99",
+		"1e3",
+		"12.9999",
+		"12..99",
+	}
+
+	for _, input := range cases {
+		if _, err := ParseExpenseMilliunits(input, "USD"); err == nil {
+			t.Fatalf("ParseExpenseMilliunits(%q, USD) returned nil error", input)
+		}
+	}
+}
