@@ -1,13 +1,17 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
 	"strings"
+
+	"github.com/creack/pty"
 )
 
 const SourceEnv = "env:YNAB_API_TOKEN"
@@ -62,18 +66,14 @@ func NewKeychainStore() KeychainStore {
 	account := ""
 	if current, err := user.Current(); err == nil {
 		account = current.Username
+	} else {
+		account = os.Getenv("USER")
 	}
 
 	return KeychainStore{
 		Account: account,
 		Service: DefaultService,
-		Run: func(ctx context.Context, name string, input string, args ...string) ([]byte, error) {
-			cmd := exec.CommandContext(ctx, name, args...)
-			if input != "" {
-				cmd.Stdin = strings.NewReader(input)
-			}
-			return cmd.Output()
-		},
+		Run:     runCommand,
 	}
 }
 
@@ -113,8 +113,43 @@ func (s KeychainStore) service() string {
 }
 
 func (s KeychainStore) validate() error {
-	if s.Account == "" {
+	if strings.TrimSpace(s.Account) == "" {
 		return fmt.Errorf("keychain account is required")
 	}
 	return nil
+}
+
+func runCommand(ctx context.Context, name string, input string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, name, args...)
+	if input == "" {
+		return cmd.Output()
+	}
+	return runCommandWithPTY(cmd, input)
+}
+
+func runCommandWithPTY(cmd *exec.Cmd, input string) ([]byte, error) {
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		return nil, err
+	}
+
+	var output bytes.Buffer
+	readDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&output, ptmx)
+		close(readDone)
+	}()
+
+	_, writeErr := io.WriteString(ptmx, input)
+	waitErr := cmd.Wait()
+	_ = ptmx.Close()
+	<-readDone
+
+	if waitErr != nil {
+		return output.Bytes(), waitErr
+	}
+	if writeErr != nil {
+		return output.Bytes(), writeErr
+	}
+	return output.Bytes(), nil
 }

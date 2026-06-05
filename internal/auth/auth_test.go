@@ -226,6 +226,40 @@ func TestKeychainStoreRefusesEmptyAccount(t *testing.T) {
 	}
 }
 
+func TestKeychainStoreRefusesWhitespaceAccount(t *testing.T) {
+	called := false
+	runner := func(context.Context, string, string, ...string) ([]byte, error) {
+		called = true
+		return nil, nil
+	}
+	store := KeychainStore{Account: " \t\n ", Service: "ynab-expense", Run: runner}
+
+	if err := store.Set(context.Background(), "secret-token"); err == nil {
+		t.Fatal("Set returned nil error, want whitespace account error")
+	}
+	if called {
+		t.Fatal("Set invoked security command with whitespace account")
+	}
+}
+
+func TestDefaultRunnerWritesInputThroughPTY(t *testing.T) {
+	runner := NewKeychainStore().Run
+
+	output, err := runner(
+		context.Background(),
+		"/bin/sh",
+		"x\n",
+		"-c",
+		"stty -echo; IFS= read -r value < /dev/tty; [ \"$value\" = x ] && printf ok",
+	)
+	if err != nil {
+		t.Fatalf("runner returned error: %v; output: %q", err, output)
+	}
+	if !strings.Contains(string(output), "ok") {
+		t.Fatalf("runner output = %q, want it to contain ok", output)
+	}
+}
+
 type securityCall struct {
 	name  string
 	input string
