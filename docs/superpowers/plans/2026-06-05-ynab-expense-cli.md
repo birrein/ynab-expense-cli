@@ -10,6 +10,17 @@
 
 ---
 
+## Execution Status
+
+Completed on branch `feat/ynab-expense-mvp`.
+
+During execution, security reviews tightened the original plan in two places:
+
+- `auth set-token` no longer accepts token values as positional argv; use the secure prompt or `--token-stdin`.
+- Keychain writes drive the macOS `security` password prompt through a PTY so the token is not exposed in process arguments.
+
+---
+
 ## File Structure
 
 - Create `go.mod`: module metadata and Cobra dependency.
@@ -40,7 +51,7 @@
 - Create: `internal/cli/root.go`
 - Create: `.gitignore`
 
-- [ ] **Step 1: Initialize module and Cobra dependency**
+- [x] **Step 1: Initialize module and Cobra dependency**
 
 Run:
 
@@ -52,7 +63,7 @@ go get golang.org/x/term@latest
 
 Expected: `go.mod` and `go.sum` exist and include Cobra plus `golang.org/x/term`.
 
-- [ ] **Step 2: Create `.gitignore`**
+- [x] **Step 2: Create `.gitignore`**
 
 Add:
 
@@ -64,7 +75,7 @@ bin/
 coverage.out
 ```
 
-- [ ] **Step 3: Write Cobra root command**
+- [x] **Step 3: Write Cobra root command**
 
 Create `internal/cli/root.go`:
 
@@ -100,7 +111,7 @@ func NewRootCommand(out io.Writer, errOut io.Writer) *cobra.Command {
 }
 ```
 
-- [ ] **Step 4: Write executable entrypoint**
+- [x] **Step 4: Write executable entrypoint**
 
 Create `cmd/ynab-expense/main.go`:
 
@@ -123,7 +134,7 @@ func main() {
 }
 ```
 
-- [ ] **Step 5: Verify skeleton builds**
+- [x] **Step 5: Verify skeleton builds**
 
 Run:
 
@@ -134,7 +145,7 @@ go build ./cmd/ynab-expense
 
 Expected: both commands pass.
 
-- [ ] **Step 6: Commit skeleton**
+- [x] **Step 6: Commit skeleton**
 
 Run:
 
@@ -151,7 +162,7 @@ git commit -m "feat(cli): scaffold ynab expense command"
 - Create: `internal/money/money.go`
 - Create: `internal/money/money_test.go`
 
-- [ ] **Step 1: Write failing tests for CLP and USD parsing**
+- [x] **Step 1: Write failing tests for CLP and USD parsing**
 
 Create `internal/money/money_test.go`:
 
@@ -213,7 +224,7 @@ func TestParseExpenseMilliunitsRejectsInvalidAmount(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -223,7 +234,7 @@ go test ./internal/money
 
 Expected: FAIL because `ParseExpenseMilliunits` is undefined.
 
-- [ ] **Step 3: Implement money parsing**
+- [x] **Step 3: Implement money parsing**
 
 Create `internal/money/money.go`:
 
@@ -297,7 +308,7 @@ func absInt64(value int64) int64 {
 }
 ```
 
-- [ ] **Step 4: Run money tests**
+- [x] **Step 4: Run money tests**
 
 Run:
 
@@ -307,7 +318,7 @@ go test ./internal/money
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit money parser**
+- [x] **Step 5: Commit money parser**
 
 Run:
 
@@ -324,7 +335,7 @@ git commit -m "feat(money): parse currency amounts to milliunits"
 - Create: `internal/transactions/transaction.go`
 - Create: `internal/transactions/transaction_test.go`
 
-- [ ] **Step 1: Write failing transaction tests**
+- [x] **Step 1: Write failing transaction tests**
 
 Create `internal/transactions/transaction_test.go`:
 
@@ -395,7 +406,7 @@ func TestBuildExpenseStableImportID(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -405,7 +416,7 @@ go test ./internal/transactions
 
 Expected: FAIL because `BuildExpense` and `Input` are undefined.
 
-- [ ] **Step 3: Implement transaction builder**
+- [x] **Step 3: Implement transaction builder**
 
 Create `internal/transactions/transaction.go`:
 
@@ -510,7 +521,7 @@ func int64String(value int64) string {
 }
 ```
 
-- [ ] **Step 4: Run transaction tests**
+- [x] **Step 4: Run transaction tests**
 
 Run:
 
@@ -520,7 +531,7 @@ go test ./internal/transactions
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit transaction builder**
+- [x] **Step 5: Commit transaction builder**
 
 Run:
 
@@ -537,7 +548,7 @@ git commit -m "feat(transactions): build safe expense payloads"
 - Create: `internal/auth/auth.go`
 - Create: `internal/auth/auth_test.go`
 
-- [ ] **Step 1: Write failing auth tests**
+- [x] **Step 1: Write failing auth tests**
 
 Create `internal/auth/auth_test.go`:
 
@@ -627,7 +638,7 @@ func (f *fakeStore) Set(ctx context.Context, token string) error {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -637,7 +648,7 @@ go test ./internal/auth
 
 Expected: FAIL because auth types are undefined.
 
-- [ ] **Step 3: Implement auth package**
+- [x] **Step 3: Implement auth package**
 
 Create `internal/auth/auth.go`:
 
@@ -733,7 +744,7 @@ func runCommand(ctx context.Context, name string, args ...string) ([]byte, error
 }
 ```
 
-- [ ] **Step 4: Run auth tests**
+- [x] **Step 4: Run auth tests**
 
 Run:
 
@@ -743,7 +754,7 @@ go test ./internal/auth
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit auth package**
+- [x] **Step 5: Commit auth package**
 
 Run:
 
@@ -760,7 +771,7 @@ git commit -m "feat(auth): resolve ynab token from env and keychain"
 - Create: `internal/ynab/client.go`
 - Create: `internal/ynab/client_test.go`
 
-- [ ] **Step 1: Write failing YNAB client tests**
+- [x] **Step 1: Write failing YNAB client tests**
 
 Create `internal/ynab/client_test.go`:
 
@@ -871,7 +882,7 @@ func writeJSON(w http.ResponseWriter, value any) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -881,7 +892,7 @@ go test ./internal/ynab
 
 Expected: FAIL because `NewClient` and methods are undefined.
 
-- [ ] **Step 3: Implement YNAB client**
+- [x] **Step 3: Implement YNAB client**
 
 Create `internal/ynab/client.go`:
 
@@ -1001,7 +1012,7 @@ func parseAPIError(status int, body []byte) error {
 }
 ```
 
-- [ ] **Step 4: Run YNAB client tests**
+- [x] **Step 4: Run YNAB client tests**
 
 Run:
 
@@ -1011,7 +1022,7 @@ go test ./internal/ynab
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit YNAB client**
+- [x] **Step 5: Commit YNAB client**
 
 Run:
 
@@ -1030,7 +1041,7 @@ git commit -m "feat(ynab): add official api client"
 - Create: `internal/cli/list.go`
 - Create: `internal/cli/cli_test.go`
 
-- [ ] **Step 1: Write failing CLI tests for auth status and budgets**
+- [x] **Step 1: Write failing CLI tests for auth status and budgets**
 
 Create `internal/cli/cli_test.go`:
 
@@ -1074,7 +1085,7 @@ func TestBudgetsRequiresTokenWhenNoTestToken(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1084,7 +1095,7 @@ go test ./internal/cli
 
 Expected: FAIL because commands are not registered.
 
-- [ ] **Step 3: Add auth and list command structure**
+- [x] **Step 3: Add auth and list command structure**
 
 Modify `internal/cli/root.go`:
 
@@ -1310,7 +1321,7 @@ func (a *App) newTransactionsCommand() *cobra.Command {
 }
 ```
 
-- [ ] **Step 4: Run CLI package tests**
+- [x] **Step 4: Run CLI package tests**
 
 Run:
 
@@ -1320,7 +1331,7 @@ go test ./internal/cli
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit auth/list commands**
+- [x] **Step 5: Commit auth/list commands**
 
 Run:
 
@@ -1338,7 +1349,7 @@ git commit -m "feat(cli): add auth and listing commands"
 - Create: `internal/cli/add.go`
 - Modify: `internal/cli/cli_test.go`
 
-- [ ] **Step 1: Add failing tests for add dry-run, flag conflicts, and commit token requirement**
+- [x] **Step 1: Add failing tests for add dry-run, flag conflicts, and commit token requirement**
 
 Append to `internal/cli/cli_test.go`:
 
@@ -1384,7 +1395,7 @@ func TestAddCommitRequiresToken(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run:
 
@@ -1394,7 +1405,7 @@ go test ./internal/cli
 
 Expected: FAIL because `add` is not registered.
 
-- [ ] **Step 3: Register add command**
+- [x] **Step 3: Register add command**
 
 Modify `internal/cli/root.go` so command registration includes `app.newAddCommand()`:
 
@@ -1402,7 +1413,7 @@ Modify `internal/cli/root.go` so command registration includes `app.newAddComman
 cmd.AddCommand(app.newAddCommand())
 ```
 
-- [ ] **Step 4: Implement add command**
+- [x] **Step 4: Implement add command**
 
 Create `internal/cli/add.go`:
 
@@ -1498,7 +1509,7 @@ type anyWriter interface {
 }
 ```
 
-- [ ] **Step 5: Run CLI tests**
+- [x] **Step 5: Run CLI tests**
 
 Run:
 
@@ -1508,7 +1519,7 @@ go test ./internal/cli
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit add command**
+- [x] **Step 6: Commit add command**
 
 Run:
 
@@ -1524,7 +1535,7 @@ git commit -m "feat(cli): add dry-run expense command"
 **Files:**
 - Create: `README.md`
 
-- [ ] **Step 1: Write README**
+- [x] **Step 1: Write README**
 
 Create `README.md`:
 
@@ -1641,7 +1652,7 @@ go build ./cmd/ynab-expense
 ```
 ```
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 Run:
 
@@ -1651,7 +1662,7 @@ go test ./...
 
 Expected: PASS.
 
-- [ ] **Step 3: Build local binary**
+- [x] **Step 3: Build local binary**
 
 Run:
 
@@ -1662,7 +1673,7 @@ go build -o ynab-expense ./cmd/ynab-expense
 
 Expected: binary builds and help prints available commands.
 
-- [ ] **Step 4: Verify dry-run locally**
+- [x] **Step 4: Verify dry-run locally**
 
 Run:
 
@@ -1672,7 +1683,7 @@ Run:
 
 Expected: pretty JSON includes `"dry_run": true`, `"amount": -12990000`, `"cleared": "uncleared"`, `"approved": false`, and `"source=ynab-expense-cli"`.
 
-- [ ] **Step 5: Commit README and verification support**
+- [x] **Step 5: Commit README and verification support**
 
 Run:
 
