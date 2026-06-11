@@ -167,6 +167,11 @@ Verify dry-run examples:
 ./ynab-expense add --budget default --account-id account-1 --amount 12.99 --currency USD --payee "Store" --date 2026-06-05 --dry-run
 ```
 
+### TODOs
+
+- [ ] Add a transaction update/edit command for existing expenses, including changing category and memo after creation.
+- [ ] Evaluate whether the project architecture should evolve to support more features as the CLI grows.
+
 ### Technical Debt
 
-- Keychain token storage currently drives `/usr/bin/security` prompts through a pseudo-terminal to avoid passing tokens through process arguments. Future hardening should evaluate a maintained Go Keychain library or expect-style PTY library.
+- [ ] Keychain token storage currently drives `/usr/bin/security` prompts through a pseudo-terminal to avoid passing tokens through process arguments. Future hardening should evaluate a maintained Go Keychain library or expect-style PTY library.
