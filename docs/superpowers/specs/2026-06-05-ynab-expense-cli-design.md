@@ -34,6 +34,10 @@ Use Go standard library packages for HTTP, JSON, dates, hashing, and process exe
 
 Do not add a Go Keychain dependency in the MVP. On macOS, store tokens by invoking `/usr/bin/security`.
 
+## Technical Debt
+
+- Keychain storage currently shells out to `/usr/bin/security` and drives its interactive password prompts through a pseudo-terminal so tokens are not passed through process arguments. This preserves the MVP security goal, but the PTY prompt handling is more fragile than a native Keychain integration. In a future hardening pass, evaluate replacing the manual prompt automation with a maintained Go Keychain library or a well-supported expect-style PTY library.
+
 ## Package Responsibilities
 
 `cmd/ynab-expense` only starts the command.

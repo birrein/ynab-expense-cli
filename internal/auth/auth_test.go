@@ -3,9 +3,11 @@ package auth
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeStore struct {
@@ -174,7 +176,7 @@ func TestKeychainStoreBuildsSecurityCommands(t *testing.T) {
 		},
 		{
 			name:  "/usr/bin/security",
-			input: "secret-token\n",
+			input: "secret-token\nsecret-token\n",
 			args:  []string{"add-generic-password", "-U", "-a", "tester", "-s", "ynab-expense", "-w"},
 		},
 	}
@@ -206,6 +208,23 @@ func TestKeychainStoreSetDoesNotPassTokenInProcessArgs(t *testing.T) {
 	}
 	if args[len(args)-1] != "-w" {
 		t.Fatalf("Set last arg = %q, want -w", args[len(args)-1])
+	}
+}
+
+func TestKeychainStoreSetWritesTokenTwiceForSecurityPromptConfirmation(t *testing.T) {
+	var input string
+	runner := func(_ context.Context, _ string, gotInput string, _ ...string) ([]byte, error) {
+		input = gotInput
+		return nil, nil
+	}
+	store := KeychainStore{Account: "tester", Service: "ynab-expense", Run: runner}
+
+	if err := store.Set(context.Background(), "secret-token"); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+
+	if input != "secret-token\nsecret-token\n" {
+		t.Fatalf("Set input = %q, want token written twice for security confirmation", input)
 	}
 }
 
@@ -291,6 +310,32 @@ func TestDefaultRunnerWritesInputThroughPTY(t *testing.T) {
 	}
 	if !strings.Contains(string(output), "ok") {
 		t.Fatalf("runner output = %q, want it to contain ok", output)
+	}
+}
+
+func TestKeychainStoreSetWithRealSecurityPrompt(t *testing.T) {
+	if os.Getenv("YNAB_EXPENSE_KEYCHAIN_INTEGRATION") != "1" {
+		t.Skip("set YNAB_EXPENSE_KEYCHAIN_INTEGRATION=1 to run Keychain integration test")
+	}
+
+	store := NewKeychainStore()
+	store.Service = "ynab-expense-cli-test"
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, _ = store.runner()(context.Background(), "/usr/bin/security", "", "delete-generic-password", "-a", store.Account, "-s", store.Service)
+	t.Cleanup(func() {
+		_, _ = store.runner()(context.Background(), "/usr/bin/security", "", "delete-generic-password", "-a", store.Account, "-s", store.Service)
+	})
+
+	if err := store.Set(ctx, "secret-token"); err != nil {
+		t.Fatalf("Set returned error: %v", err)
+	}
+	got, err := store.Get(context.Background())
+	if err != nil {
+		t.Fatalf("Get returned error: %v", err)
+	}
+	if got != "secret-token" {
+		t.Fatalf("Get token = %q, want secret-token", got)
 	}
 }
 

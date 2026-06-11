@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"os/user"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/creack/pty"
 )
@@ -97,7 +99,7 @@ func (s KeychainStore) Set(ctx context.Context, token string) error {
 		return err
 	}
 
-	_, err := s.runner()(ctx, "/usr/bin/security", token+"\n", "add-generic-password", "-U", "-a", s.Account, "-s", s.service(), "-w")
+	_, err := s.runner()(ctx, "/usr/bin/security", token+"\n"+token+"\n", "add-generic-password", "-U", "-a", s.Account, "-s", s.service(), "-w")
 	return err
 }
 
@@ -141,22 +143,81 @@ func runCommandWithPTY(cmd *exec.Cmd, input string) ([]byte, error) {
 	}
 
 	var output bytes.Buffer
+	var outputMu sync.Mutex
+	outputChanged := make(chan struct{}, 1)
 	readDone := make(chan struct{})
 	go func() {
-		_, _ = io.Copy(&output, ptmx)
+		buf := make([]byte, 1024)
+		for {
+			n, err := ptmx.Read(buf)
+			if n > 0 {
+				outputMu.Lock()
+				_, _ = output.Write(buf[:n])
+				outputMu.Unlock()
+				select {
+				case outputChanged <- struct{}{}:
+				default:
+				}
+			}
+			if err != nil {
+				break
+			}
+		}
 		close(readDone)
 	}()
 
-	_, writeErr := io.WriteString(ptmx, input)
+	writeErr := writeInputChunks(ptmx, input, func() int {
+		outputMu.Lock()
+		defer outputMu.Unlock()
+		return output.Len()
+	}, outputChanged)
 	waitErr := cmd.Wait()
 	_ = ptmx.Close()
 	<-readDone
 
+	outputMu.Lock()
+	outputBytes := output.Bytes()
+	outputMu.Unlock()
+
 	if waitErr != nil {
-		return output.Bytes(), waitErr
+		return outputBytes, waitErr
 	}
 	if writeErr != nil {
-		return output.Bytes(), writeErr
+		return outputBytes, writeErr
 	}
-	return output.Bytes(), nil
+	return outputBytes, nil
+}
+
+func writeInputChunks(w io.Writer, input string, outputLen func() int, outputChanged <-chan struct{}) error {
+	chunks := strings.SplitAfter(input, "\n")
+	if len(chunks) > 0 && chunks[len(chunks)-1] == "" {
+		chunks = chunks[:len(chunks)-1]
+	}
+	if len(chunks) > 1 {
+		waitForPTYOutput(0, outputLen, outputChanged)
+	}
+
+	for index, chunk := range chunks {
+		if index > 0 {
+			waitForPTYOutput(outputLen(), outputLen, outputChanged)
+			time.Sleep(50 * time.Millisecond)
+		}
+		if _, err := io.WriteString(w, strings.ReplaceAll(chunk, "\n", "\r")); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func waitForPTYOutput(previousLen int, outputLen func() int, outputChanged <-chan struct{}) {
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+
+	for outputLen() <= previousLen {
+		select {
+		case <-outputChanged:
+		case <-timer.C:
+			return
+		}
+	}
 }
