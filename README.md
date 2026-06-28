@@ -209,6 +209,7 @@ Verify dry-run examples:
 ### TODOs
 
 - [ ] Add a transaction update/edit command for existing expenses, including changing category and memo after creation.
+- [ ] Add split transaction support so one card charge can be divided across multiple categories and payees.
 - [ ] Evaluate whether the project architecture should evolve to support more features as the CLI grows.
 
 ### Technical Debt
