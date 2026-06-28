@@ -561,6 +561,17 @@ func TestConfigShowRejectsExtraArgs(t *testing.T) {
 	}
 }
 
+func TestConfigRejectsExtraArgs(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "config", "extra")
+
+	if err == nil {
+		t.Fatal("config accepted an extra argument")
+	}
+}
+
 func TestConfigSetDefaultsWritesBudgetAndAccount(t *testing.T) {
 	var out bytes.Buffer
 	store := &fakeConfigStore{}
