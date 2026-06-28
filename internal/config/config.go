@@ -60,8 +60,12 @@ func (s Store) Save(cfg Config) error {
 	}
 	data = append(data, '\n')
 
-	if err := os.MkdirAll(filepath.Dir(s.Path), 0o700); err != nil {
-		return fmt.Errorf("create config directory %s: %w", filepath.Dir(s.Path), err)
+	dir := filepath.Dir(s.Path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create config directory %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("set config directory permissions %s: %w", dir, err)
 	}
 	if err := os.WriteFile(s.Path, data, 0o600); err != nil {
 		return fmt.Errorf("write config %s: %w", s.Path, err)

@@ -65,6 +65,29 @@ func TestStoreSaveCreatesParentDirectoryAndWritesIndentedJSON(t *testing.T) {
 	}
 }
 
+func TestStoreSaveRestrictsExistingParentDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ynab-expense")
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		t.Fatalf("MkdirAll returned error: %v", err)
+	}
+	if err := os.Chmod(dir, 0o777); err != nil {
+		t.Fatalf("Chmod returned error: %v", err)
+	}
+	store := Store{Path: filepath.Join(dir, "config.json")}
+
+	if err := store.Save(Config{DefaultBudgetID: "budget-1"}); err != nil {
+		t.Fatalf("Save returned error: %v", err)
+	}
+
+	parentInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("Stat parent dir returned error: %v", err)
+	}
+	if got := parentInfo.Mode().Perm(); got != 0o700 {
+		t.Fatalf("parent dir mode = %o, want 700", got)
+	}
+}
+
 func TestStoreLoadMalformedJSONIncludesPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "ynab-expense", "config.json")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
