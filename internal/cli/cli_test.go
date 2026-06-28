@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/birrein/ynab-expense-cli/internal/auth"
+	localconfig "github.com/birrein/ynab-expense-cli/internal/config"
 	"github.com/birrein/ynab-expense-cli/internal/transactions"
 	"github.com/spf13/cobra"
 )
@@ -535,6 +536,101 @@ func TestAddDefaultsCurrencyToCLP(t *testing.T) {
 	}
 }
 
+func TestConfigShowPrintsEmptyObjectWhenNoConfig(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "config", "show")
+
+	if err != nil {
+		t.Fatalf("config show returned error: %v", err)
+	}
+	if out.String() != "{}\n" {
+		t.Fatalf("expected empty config object, got %q", out.String())
+	}
+}
+
+func TestConfigSetDefaultsWritesBudgetAndAccount(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--budget-id", " budget-123 ",
+		"--budget-name", " Household ",
+		"--account-id", " account-456 ",
+		"--account-name", " Checking ",
+	)
+
+	if err != nil {
+		t.Fatalf("config set-defaults returned error: %v", err)
+	}
+	if !store.updateCalled {
+		t.Fatal("config set-defaults did not update config")
+	}
+	want := localconfig.Config{
+		DefaultBudgetID:    "budget-123",
+		DefaultBudgetName:  "Household",
+		DefaultAccountID:   "account-456",
+		DefaultAccountName: "Checking",
+	}
+	if store.update != want {
+		t.Fatalf("expected update %#v, got %#v", want, store.update)
+	}
+	if out.String() != "Config saved.\n" {
+		t.Fatalf("expected saved message, got %q", out.String())
+	}
+}
+
+func TestConfigSetDefaultsCanSetOnlyAccount(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--account-id", " account-456 ",
+		"--account-name", " Checking ",
+	)
+
+	if err != nil {
+		t.Fatalf("config set-defaults returned error: %v", err)
+	}
+	want := localconfig.Config{
+		DefaultAccountID:   "account-456",
+		DefaultAccountName: "Checking",
+	}
+	if store.update != want {
+		t.Fatalf("expected update %#v, got %#v", want, store.update)
+	}
+}
+
+func TestConfigSetDefaultsRejectsNoIDs(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--budget-name", "Household",
+		"--account-name", "Checking",
+	)
+
+	if err == nil {
+		t.Fatal("config set-defaults accepted no IDs")
+	}
+	if !strings.Contains(err.Error(), "at least one default value is required") {
+		t.Fatalf("expected missing default error, got %q", err.Error())
+	}
+	if store.updateCalled {
+		t.Fatal("config set-defaults updated config after validation failure")
+	}
+}
+
 func commandWithFakeClient(out io.Writer, client ynabClient) *cobra.Command {
 	return newRootCommandWithDeps(out, out, cliDeps{
 		tokenResolver: fakeTokenResolver{token: "secret-token", source: auth.SourceEnv},
@@ -582,6 +678,51 @@ func (s *fakeTokenStore) Set(_ context.Context, token string) error {
 	}
 	s.token = token
 	return nil
+}
+
+type fakeConfigStore struct {
+	config       localconfig.Config
+	loadErr      error
+	saveErr      error
+	updateErr    error
+	update       localconfig.Config
+	updateCalled bool
+}
+
+func (s *fakeConfigStore) Load() (localconfig.Config, error) {
+	if s.loadErr != nil {
+		return localconfig.Config{}, s.loadErr
+	}
+	return s.config, nil
+}
+
+func (s *fakeConfigStore) Save(cfg localconfig.Config) error {
+	if s.saveErr != nil {
+		return s.saveErr
+	}
+	s.config = cfg
+	return nil
+}
+
+func (s *fakeConfigStore) Update(update localconfig.Config) (localconfig.Config, error) {
+	if s.updateErr != nil {
+		return localconfig.Config{}, s.updateErr
+	}
+	s.update = update
+	s.updateCalled = true
+	if update.DefaultBudgetID != "" {
+		s.config.DefaultBudgetID = update.DefaultBudgetID
+	}
+	if update.DefaultBudgetName != "" {
+		s.config.DefaultBudgetName = update.DefaultBudgetName
+	}
+	if update.DefaultAccountID != "" {
+		s.config.DefaultAccountID = update.DefaultAccountID
+	}
+	if update.DefaultAccountName != "" {
+		s.config.DefaultAccountName = update.DefaultAccountName
+	}
+	return s.config, nil
 }
 
 type fakeYNABClient struct {

@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/birrein/ynab-expense-cli/internal/auth"
+	localconfig "github.com/birrein/ynab-expense-cli/internal/config"
 	"github.com/birrein/ynab-expense-cli/internal/transactions"
 	"github.com/birrein/ynab-expense-cli/internal/ynab"
 	"github.com/spf13/cobra"
@@ -26,6 +27,12 @@ type tokenStore interface {
 	Set(context.Context, string) error
 }
 
+type configStore interface {
+	Load() (localconfig.Config, error)
+	Save(localconfig.Config) error
+	Update(localconfig.Config) (localconfig.Config, error)
+}
+
 type ynabClient interface {
 	GetPlans(context.Context) ([]byte, error)
 	GetAccounts(context.Context, string) ([]byte, error)
@@ -37,6 +44,7 @@ type ynabClient interface {
 type cliDeps struct {
 	tokenResolver     tokenResolver
 	tokenStore        tokenStore
+	configStore       configStore
 	ynabClientFactory func(token string) ynabClient
 	promptToken       func() (string, error)
 	stdin             io.Reader
@@ -45,9 +53,14 @@ type cliDeps struct {
 
 func NewRootCommand(out io.Writer, errOut io.Writer) *cobra.Command {
 	store := auth.NewKeychainStore()
+	configStore, err := localconfig.NewStore()
+	if err != nil {
+		configStore = localconfig.Store{}
+	}
 	return newRootCommandWithDeps(out, errOut, cliDeps{
 		tokenResolver: auth.Resolver{Store: store},
 		tokenStore:    store,
+		configStore:   configStore,
 		ynabClientFactory: func(token string) ynabClient {
 			return ynab.NewClient("", token, (*http.Client)(nil))
 		},
@@ -82,6 +95,7 @@ func newRootCommandWithDeps(out io.Writer, errOut io.Writer, deps cliDeps) *cobr
 	cmd.AddCommand(app.newCategoriesCommand())
 	cmd.AddCommand(app.newTransactionsCommand())
 	cmd.AddCommand(app.newAddCommand())
+	cmd.AddCommand(app.newConfigCommand())
 
 	return cmd
 }
