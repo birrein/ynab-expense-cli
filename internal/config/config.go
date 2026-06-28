@@ -27,11 +27,15 @@ func NewStore() (Store, error) {
 }
 
 func DefaultPath() (string, error) {
-	dir, err := os.UserConfigDir()
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "ynab-expense", "config.json"), nil
+	}
+
+	dir, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, "ynab-expense", "config.json"), nil
+	return filepath.Join(dir, ".config", "ynab-expense", "config.json"), nil
 }
 
 func (s Store) Load() (Config, error) {

@@ -4,9 +4,44 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestDefaultPathUsesXDGConfigHome(t *testing.T) {
+	configDir := filepath.Join(t.TempDir(), "xdg-config")
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	got, err := DefaultPath()
+	if err != nil {
+		t.Fatalf("DefaultPath returned error: %v", err)
+	}
+
+	want := filepath.Join(configDir, "ynab-expense", "config.json")
+	if got != want {
+		t.Fatalf("DefaultPath = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultPathDefaultsToDotConfigUnderHome(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("HOME-based fallback is only used on Unix-like platforms")
+	}
+	home := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", home)
+
+	got, err := DefaultPath()
+	if err != nil {
+		t.Fatalf("DefaultPath returned error: %v", err)
+	}
+
+	want := filepath.Join(home, ".config", "ynab-expense", "config.json")
+	if got != want {
+		t.Fatalf("DefaultPath = %q, want %q", got, want)
+	}
+}
 
 func TestStoreLoadMissingFileReturnsEmptyConfig(t *testing.T) {
 	store := Store{Path: filepath.Join(t.TempDir(), "ynab-expense", "config.json")}
