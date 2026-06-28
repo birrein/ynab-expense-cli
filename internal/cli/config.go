@@ -26,6 +26,7 @@ func (a *App) newConfigShowCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "show",
 		Short: "Show local CLI defaults",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := a.loadConfig()
 			if err != nil {
@@ -55,6 +56,7 @@ func (a *App) newConfigSetDefaultsCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "set-defaults",
 		Short: "Set local CLI defaults",
+		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			budgetID = strings.TrimSpace(budgetID)
 			budgetName = strings.TrimSpace(budgetName)
@@ -95,4 +97,22 @@ func (a *App) loadConfig() (localconfig.Config, error) {
 		return localconfig.Config{}, nil
 	}
 	return a.deps.configStore.Load()
+}
+
+type unavailableConfigStore struct {
+	err error
+}
+
+func (s unavailableConfigStore) Load() (localconfig.Config, error) {
+	if s.err != nil {
+		return localconfig.Config{}, s.err
+	}
+	return localconfig.Config{}, errors.New("config store is unavailable")
+}
+
+func (s unavailableConfigStore) Update(localconfig.Config) (localconfig.Config, error) {
+	if s.err != nil {
+		return localconfig.Config{}, s.err
+	}
+	return localconfig.Config{}, errors.New("config store is unavailable")
 }

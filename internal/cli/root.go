@@ -29,7 +29,6 @@ type tokenStore interface {
 
 type configStore interface {
 	Load() (localconfig.Config, error)
-	Save(localconfig.Config) error
 	Update(localconfig.Config) (localconfig.Config, error)
 }
 
@@ -55,7 +54,18 @@ func NewRootCommand(out io.Writer, errOut io.Writer) *cobra.Command {
 	store := auth.NewKeychainStore()
 	configStore, err := localconfig.NewStore()
 	if err != nil {
-		configStore = localconfig.Store{}
+		return newRootCommandWithDeps(out, errOut, cliDeps{
+			tokenResolver: auth.Resolver{Store: store},
+			tokenStore:    store,
+			configStore:   unavailableConfigStore{err: err},
+			ynabClientFactory: func(token string) ynabClient {
+				return ynab.NewClient("", token, (*http.Client)(nil))
+			},
+			stdin: os.Stdin,
+			stdinFD: func() int {
+				return int(os.Stdin.Fd())
+			},
+		})
 	}
 	return newRootCommandWithDeps(out, errOut, cliDeps{
 		tokenResolver: auth.Resolver{Store: store},

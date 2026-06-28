@@ -550,6 +550,17 @@ func TestConfigShowPrintsEmptyObjectWhenNoConfig(t *testing.T) {
 	}
 }
 
+func TestConfigShowRejectsExtraArgs(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "config", "show", "extra")
+
+	if err == nil {
+		t.Fatal("config show accepted an extra argument")
+	}
+}
+
 func TestConfigSetDefaultsWritesBudgetAndAccount(t *testing.T) {
 	var out bytes.Buffer
 	store := &fakeConfigStore{}
@@ -608,6 +619,26 @@ func TestConfigSetDefaultsCanSetOnlyAccount(t *testing.T) {
 	}
 }
 
+func TestConfigSetDefaultsRejectsExtraArgs(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--account-id", "account-456",
+		"extra",
+	)
+
+	if err == nil {
+		t.Fatal("config set-defaults accepted an extra argument")
+	}
+	if store.updateCalled {
+		t.Fatal("config set-defaults updated config after argument validation failure")
+	}
+}
+
 func TestConfigSetDefaultsRejectsNoIDs(t *testing.T) {
 	var out bytes.Buffer
 	store := &fakeConfigStore{}
@@ -628,6 +659,21 @@ func TestConfigSetDefaultsRejectsNoIDs(t *testing.T) {
 	}
 	if store.updateCalled {
 		t.Fatal("config set-defaults updated config after validation failure")
+	}
+}
+
+func TestConfigUnavailableStoreReturnsInitError(t *testing.T) {
+	initErr := errors.New("init config failed")
+	store := unavailableConfigStore{err: initErr}
+
+	_, loadErr := store.Load()
+	if !errors.Is(loadErr, initErr) {
+		t.Fatalf("expected load error %v, got %v", initErr, loadErr)
+	}
+
+	_, updateErr := store.Update(localconfig.Config{DefaultAccountID: "account-456"})
+	if !errors.Is(updateErr, initErr) {
+		t.Fatalf("expected update error %v, got %v", initErr, updateErr)
 	}
 }
 
@@ -683,7 +729,6 @@ func (s *fakeTokenStore) Set(_ context.Context, token string) error {
 type fakeConfigStore struct {
 	config       localconfig.Config
 	loadErr      error
-	saveErr      error
 	updateErr    error
 	update       localconfig.Config
 	updateCalled bool
@@ -694,14 +739,6 @@ func (s *fakeConfigStore) Load() (localconfig.Config, error) {
 		return localconfig.Config{}, s.loadErr
 	}
 	return s.config, nil
-}
-
-func (s *fakeConfigStore) Save(cfg localconfig.Config) error {
-	if s.saveErr != nil {
-		return s.saveErr
-	}
-	s.config = cfg
-	return nil
 }
 
 func (s *fakeConfigStore) Update(update localconfig.Config) (localconfig.Config, error) {
