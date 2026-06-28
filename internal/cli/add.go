@@ -43,7 +43,7 @@ func (a *App) newAddCommand() *cobra.Command {
 				return fmt.Errorf("--dry-run cannot be used with --commit")
 			}
 
-			input, err := validateAddInput(addInput{
+			rawInput := addInput{
 				Budget:     budget,
 				AccountID:  accountID,
 				Amount:     amount,
@@ -52,7 +52,21 @@ func (a *App) newAddCommand() *cobra.Command {
 				Date:       date,
 				CategoryID: categoryID,
 				Memo:       memo,
-			})
+			}
+
+			resolvedBudget, err := a.resolveBudget(cmd, rawInput.Budget)
+			if err != nil {
+				return err
+			}
+			rawInput.Budget = resolvedBudget
+
+			resolvedAccountID, err := a.resolveAccountID(cmd, rawInput.AccountID)
+			if err != nil {
+				return err
+			}
+			rawInput.AccountID = resolvedAccountID
+
+			input, err := validateAddInput(rawInput)
 			if err != nil {
 				return err
 			}
@@ -113,13 +127,28 @@ func (a *App) newAddCommand() *cobra.Command {
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview transaction without sending it")
 	cmd.Flags().BoolVar(&commit, "commit", false, "Create transaction in YNAB")
 
-	for _, name := range []string{"account-id", "amount", "payee", "date"} {
+	for _, name := range []string{"amount", "payee", "date"} {
 		if err := cmd.MarkFlagRequired(name); err != nil {
 			panic(err)
 		}
 	}
 
 	return cmd
+}
+
+func (a *App) resolveAccountID(cmd *cobra.Command, accountID string) (string, error) {
+	if cmd.Flags().Changed("account-id") {
+		return accountID, nil
+	}
+
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(cfg.DefaultAccountID) != "" {
+		return strings.TrimSpace(cfg.DefaultAccountID), nil
+	}
+	return accountID, nil
 }
 
 func validateAddInput(input addInput) (addInput, error) {

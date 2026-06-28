@@ -82,6 +82,44 @@ func TestAccountsListsResponseWithoutLiveAPI(t *testing.T) {
 	}
 }
 
+func TestAccountsUsesConfiguredDefaultBudgetWhenFlagOmitted(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		accountsResponse: []byte(`{"data":{"accounts":[{"name":"Checking"}]}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID: " budget-config ",
+	})
+
+	err := executeCommand(cmd, "accounts")
+
+	if err != nil {
+		t.Fatalf("accounts returned error: %v", err)
+	}
+	if client.accountsBudget != "budget-config" {
+		t.Fatalf("expected configured budget budget-config, got %q", client.accountsBudget)
+	}
+}
+
+func TestAccountsExplicitBudgetOverridesConfiguredDefault(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		accountsResponse: []byte(`{"data":{"accounts":[{"name":"Checking"}]}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID: "budget-config",
+	})
+
+	err := executeCommand(cmd, "accounts", "--budget", " budget-flag ")
+
+	if err != nil {
+		t.Fatalf("accounts returned error: %v", err)
+	}
+	if client.accountsBudget != "budget-flag" {
+		t.Fatalf("expected explicit budget budget-flag, got %q", client.accountsBudget)
+	}
+}
+
 func TestAuthSetTokenRejectsPositionalToken(t *testing.T) {
 	var out bytes.Buffer
 	store := &fakeTokenStore{}
@@ -245,6 +283,25 @@ func TestCategoriesForwardsBudgetAndWritesResponse(t *testing.T) {
 	}
 }
 
+func TestCategoriesUsesConfiguredDefaultBudgetWhenFlagOmitted(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		categoriesResponse: []byte(`{"data":{"categories":[{"name":"Food"}]}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID: " budget-config ",
+	})
+
+	err := executeCommand(cmd, "categories")
+
+	if err != nil {
+		t.Fatalf("categories returned error: %v", err)
+	}
+	if client.categoriesBudget != "budget-config" {
+		t.Fatalf("expected configured budget budget-config, got %q", client.categoriesBudget)
+	}
+}
+
 func TestTransactionsForwardsFiltersAndWritesResponse(t *testing.T) {
 	var out bytes.Buffer
 	client := &fakeYNABClient{
@@ -268,6 +325,25 @@ func TestTransactionsForwardsFiltersAndWritesResponse(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"Lunch"`) {
 		t.Fatalf("transactions output did not include response JSON, got %q", out.String())
+	}
+}
+
+func TestTransactionsUsesConfiguredDefaultBudgetWhenFlagOmitted(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		transactionsResponse: []byte(`{"data":{"transactions":[{"memo":"Lunch"}]}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID: " budget-config ",
+	})
+
+	err := executeCommand(cmd, "transactions", "--since", "2026-06-01", "--until", "2026-06-05")
+
+	if err != nil {
+		t.Fatalf("transactions returned error: %v", err)
+	}
+	if client.transactionsBudget != "budget-config" {
+		t.Fatalf("expected configured budget budget-config, got %q", client.transactionsBudget)
 	}
 }
 
@@ -298,6 +374,74 @@ func TestAddDryRunDoesNotRequireToken(t *testing.T) {
 		`"source=ynab-expense-cli"`,
 		`"cleared": "uncleared"`,
 		`"approved": false`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("add dry-run output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestAddDryRunUsesConfiguredBudgetAndAccount(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		configStore: fakeConfigStoreValue(localconfig.Config{
+			DefaultBudgetID:  " budget-config ",
+			DefaultAccountID: " account-config ",
+		}),
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--amount", "12.990",
+		"--currency", "CLP",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--dry-run",
+	)
+
+	if err != nil {
+		t.Fatalf("add dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"budget": "budget-config"`,
+		`"account_id": "account-config"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("add dry-run output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestAddExplicitBudgetAndAccountOverrideConfiguredDefaults(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		configStore: fakeConfigStoreValue(localconfig.Config{
+			DefaultBudgetID:  "budget-config",
+			DefaultAccountID: "account-config",
+		}),
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--budget", " budget-flag ",
+		"--account-id", " account-flag ",
+		"--amount", "12.990",
+		"--currency", "CLP",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--dry-run",
+	)
+
+	if err != nil {
+		t.Fatalf("add dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"budget": "budget-flag"`,
+		`"account_id": "account-flag"`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("add dry-run output missing %s, got %q", want, output)
@@ -695,6 +839,20 @@ func commandWithFakeClient(out io.Writer, client ynabClient) *cobra.Command {
 			return client
 		},
 	})
+}
+
+func commandWithFakeClientAndConfig(out io.Writer, client ynabClient, cfg localconfig.Config) *cobra.Command {
+	return newRootCommandWithDeps(out, out, cliDeps{
+		configStore:   fakeConfigStoreValue(cfg),
+		tokenResolver: fakeTokenResolver{token: "secret-token", source: auth.SourceEnv},
+		ynabClientFactory: func(token string) ynabClient {
+			return client
+		},
+	})
+}
+
+func fakeConfigStoreValue(cfg localconfig.Config) *fakeConfigStore {
+	return &fakeConfigStore{config: cfg}
 }
 
 func executeCommand(cmd *cobra.Command, args ...string) error {

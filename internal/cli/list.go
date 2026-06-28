@@ -3,6 +3,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/birrein/ynab-expense-cli/internal/auth"
 	"github.com/spf13/cobra"
@@ -37,12 +38,17 @@ func (a *App) newAccountsCommand() *cobra.Command {
 		Short: "List YNAB accounts",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedBudget, err := a.resolveBudget(cmd, budget)
+			if err != nil {
+				return err
+			}
+
 			client, err := a.clientForCommand(cmd)
 			if err != nil {
 				return err
 			}
 
-			body, err := client.GetAccounts(cmd.Context(), budget)
+			body, err := client.GetAccounts(cmd.Context(), resolvedBudget)
 			if err != nil {
 				return err
 			}
@@ -60,12 +66,17 @@ func (a *App) newCategoriesCommand() *cobra.Command {
 		Short: "List YNAB categories",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedBudget, err := a.resolveBudget(cmd, budget)
+			if err != nil {
+				return err
+			}
+
 			client, err := a.clientForCommand(cmd)
 			if err != nil {
 				return err
 			}
 
-			body, err := client.GetCategories(cmd.Context(), budget)
+			body, err := client.GetCategories(cmd.Context(), resolvedBudget)
 			if err != nil {
 				return err
 			}
@@ -85,12 +96,17 @@ func (a *App) newTransactionsCommand() *cobra.Command {
 		Short: "List YNAB transactions",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			resolvedBudget, err := a.resolveBudget(cmd, budget)
+			if err != nil {
+				return err
+			}
+
 			client, err := a.clientForCommand(cmd)
 			if err != nil {
 				return err
 			}
 
-			body, err := client.GetTransactions(cmd.Context(), budget, since, until)
+			body, err := client.GetTransactions(cmd.Context(), resolvedBudget, since, until)
 			if err != nil {
 				return err
 			}
@@ -101,6 +117,30 @@ func (a *App) newTransactionsCommand() *cobra.Command {
 	cmd.Flags().StringVar(&since, "since", "", "Start date in YYYY-MM-DD")
 	cmd.Flags().StringVar(&until, "until", "", "End date in YYYY-MM-DD")
 	return cmd
+}
+
+func (a *App) resolveBudget(cmd *cobra.Command, budget string) (string, error) {
+	if cmd.Flags().Changed("budget") {
+		budget = strings.TrimSpace(budget)
+		if budget == "" {
+			return "", fmt.Errorf("--budget is required")
+		}
+		return budget, nil
+	}
+
+	cfg, err := a.loadConfig()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(cfg.DefaultBudgetID) != "" {
+		return strings.TrimSpace(cfg.DefaultBudgetID), nil
+	}
+
+	budget = strings.TrimSpace(budget)
+	if budget == "" {
+		return "", fmt.Errorf("--budget is required")
+	}
+	return budget, nil
 }
 
 func (a *App) clientForCommand(cmd *cobra.Command) (ynabClient, error) {
