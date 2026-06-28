@@ -51,6 +51,34 @@ ynab-expense auth status
 
 `auth status` reports the token source only. It never prints the token value.
 
+## Local Defaults
+
+You can store local default IDs outside the repository:
+
+```sh
+ynab-expense config set-defaults \
+  --budget-id budget-id \
+  --budget-name "Default budget" \
+  --account-id account-id \
+  --account-name "Credit card"
+```
+
+The config file lives at:
+
+```text
+~/.config/ynab-expense/config.json
+```
+
+If `XDG_CONFIG_HOME` is set, the CLI uses `$XDG_CONFIG_HOME/ynab-expense/config.json`.
+
+Show the current config:
+
+```sh
+ynab-expense config show
+```
+
+Explicit command flags always override local defaults.
+
 ## Listing Data
 
 List budgets:
@@ -59,29 +87,40 @@ List budgets:
 ynab-expense budgets
 ```
 
-List accounts in the default budget:
+List accounts in the configured default budget:
 
 ```sh
-ynab-expense accounts --budget default
+ynab-expense accounts
 ```
 
-List categories in the default budget:
+List categories in the configured default budget:
 
 ```sh
-ynab-expense categories --budget default
+ynab-expense categories
 ```
 
 List transactions since a date:
 
 ```sh
-ynab-expense transactions --budget default --since 2026-06-01
+ynab-expense transactions --since 2026-06-01
 ```
 
 ## Add Expenses
 
 `add` is dry-run by default. It prints the request payload and does not write to YNAB unless `--commit` is present.
 
-Preview a CLP expense:
+When local defaults are configured, `add` can omit `--budget` and `--account-id`:
+
+```sh
+ynab-expense add \
+  --amount 12.990 \
+  --currency CLP \
+  --payee "Comercio" \
+  --date 2026-06-05 \
+  --dry-run
+```
+
+Pass explicit flags when you want to override local defaults:
 
 ```sh
 ynab-expense add \

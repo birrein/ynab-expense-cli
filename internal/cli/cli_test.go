@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/birrein/ynab-expense-cli/internal/auth"
+	localconfig "github.com/birrein/ynab-expense-cli/internal/config"
 	"github.com/birrein/ynab-expense-cli/internal/transactions"
 	"github.com/spf13/cobra"
 )
@@ -78,6 +79,44 @@ func TestAccountsListsResponseWithoutLiveAPI(t *testing.T) {
 	output := out.String()
 	if !strings.Contains(output, `"Checking"`) {
 		t.Fatalf("accounts output did not include response JSON, got %q", output)
+	}
+}
+
+func TestAccountsUsesConfiguredDefaultBudgetWhenFlagOmitted(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		accountsResponse: []byte(`{"data":{"accounts":[{"name":"Checking"}]}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID: " budget-config ",
+	})
+
+	err := executeCommand(cmd, "accounts")
+
+	if err != nil {
+		t.Fatalf("accounts returned error: %v", err)
+	}
+	if client.accountsBudget != "budget-config" {
+		t.Fatalf("expected configured budget budget-config, got %q", client.accountsBudget)
+	}
+}
+
+func TestAccountsExplicitBudgetOverridesConfiguredDefault(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		accountsResponse: []byte(`{"data":{"accounts":[{"name":"Checking"}]}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID: "budget-config",
+	})
+
+	err := executeCommand(cmd, "accounts", "--budget", " budget-flag ")
+
+	if err != nil {
+		t.Fatalf("accounts returned error: %v", err)
+	}
+	if client.accountsBudget != "budget-flag" {
+		t.Fatalf("expected explicit budget budget-flag, got %q", client.accountsBudget)
 	}
 }
 
@@ -244,6 +283,25 @@ func TestCategoriesForwardsBudgetAndWritesResponse(t *testing.T) {
 	}
 }
 
+func TestCategoriesUsesConfiguredDefaultBudgetWhenFlagOmitted(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		categoriesResponse: []byte(`{"data":{"categories":[{"name":"Food"}]}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID: " budget-config ",
+	})
+
+	err := executeCommand(cmd, "categories")
+
+	if err != nil {
+		t.Fatalf("categories returned error: %v", err)
+	}
+	if client.categoriesBudget != "budget-config" {
+		t.Fatalf("expected configured budget budget-config, got %q", client.categoriesBudget)
+	}
+}
+
 func TestTransactionsForwardsFiltersAndWritesResponse(t *testing.T) {
 	var out bytes.Buffer
 	client := &fakeYNABClient{
@@ -267,6 +325,25 @@ func TestTransactionsForwardsFiltersAndWritesResponse(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"Lunch"`) {
 		t.Fatalf("transactions output did not include response JSON, got %q", out.String())
+	}
+}
+
+func TestTransactionsUsesConfiguredDefaultBudgetWhenFlagOmitted(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		transactionsResponse: []byte(`{"data":{"transactions":[{"memo":"Lunch"}]}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID: " budget-config ",
+	})
+
+	err := executeCommand(cmd, "transactions", "--since", "2026-06-01", "--until", "2026-06-05")
+
+	if err != nil {
+		t.Fatalf("transactions returned error: %v", err)
+	}
+	if client.transactionsBudget != "budget-config" {
+		t.Fatalf("expected configured budget budget-config, got %q", client.transactionsBudget)
 	}
 }
 
@@ -297,6 +374,74 @@ func TestAddDryRunDoesNotRequireToken(t *testing.T) {
 		`"source=ynab-expense-cli"`,
 		`"cleared": "uncleared"`,
 		`"approved": false`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("add dry-run output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestAddDryRunUsesConfiguredBudgetAndAccount(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		configStore: fakeConfigStoreValue(localconfig.Config{
+			DefaultBudgetID:  " budget-config ",
+			DefaultAccountID: " account-config ",
+		}),
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--amount", "12.990",
+		"--currency", "CLP",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--dry-run",
+	)
+
+	if err != nil {
+		t.Fatalf("add dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"budget": "budget-config"`,
+		`"account_id": "account-config"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("add dry-run output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestAddExplicitBudgetAndAccountOverrideConfiguredDefaults(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		configStore: fakeConfigStoreValue(localconfig.Config{
+			DefaultBudgetID:  "budget-config",
+			DefaultAccountID: "account-config",
+		}),
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--budget", " budget-flag ",
+		"--account-id", " account-flag ",
+		"--amount", "12.990",
+		"--currency", "CLP",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--dry-run",
+	)
+
+	if err != nil {
+		t.Fatalf("add dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"budget": "budget-flag"`,
+		`"account_id": "account-flag"`,
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("add dry-run output missing %s, got %q", want, output)
@@ -535,6 +680,241 @@ func TestAddDefaultsCurrencyToCLP(t *testing.T) {
 	}
 }
 
+func TestConfigShowPrintsEmptyObjectWhenNoConfig(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "config", "show")
+
+	if err != nil {
+		t.Fatalf("config show returned error: %v", err)
+	}
+	if out.String() != "{}\n" {
+		t.Fatalf("expected empty config object, got %q", out.String())
+	}
+}
+
+func TestConfigShowRejectsExtraArgs(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "config", "show", "extra")
+
+	if err == nil {
+		t.Fatal("config show accepted an extra argument")
+	}
+}
+
+func TestConfigRejectsExtraArgs(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "config", "extra")
+
+	if err == nil {
+		t.Fatal("config accepted an extra argument")
+	}
+}
+
+func TestConfigSetDefaultsWritesBudgetAndAccount(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--budget-id", " budget-123 ",
+		"--budget-name", " Household ",
+		"--account-id", " account-456 ",
+		"--account-name", " Checking ",
+	)
+
+	if err != nil {
+		t.Fatalf("config set-defaults returned error: %v", err)
+	}
+	if !store.updateCalled {
+		t.Fatal("config set-defaults did not update config")
+	}
+	want := localconfig.Config{
+		DefaultBudgetID:    "budget-123",
+		DefaultBudgetName:  "Household",
+		DefaultAccountID:   "account-456",
+		DefaultAccountName: "Checking",
+	}
+	if store.update != want {
+		t.Fatalf("expected update %#v, got %#v", want, store.update)
+	}
+	if out.String() != "Config saved.\n" {
+		t.Fatalf("expected saved message, got %q", out.String())
+	}
+}
+
+func TestConfigSetDefaultsCanSetOnlyAccount(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--account-id", " account-456 ",
+		"--account-name", " Checking ",
+	)
+
+	if err != nil {
+		t.Fatalf("config set-defaults returned error: %v", err)
+	}
+	want := localconfig.Config{
+		DefaultAccountID:   "account-456",
+		DefaultAccountName: "Checking",
+	}
+	if store.update != want {
+		t.Fatalf("expected update %#v, got %#v", want, store.update)
+	}
+}
+
+func TestConfigSetDefaultsRejectsExtraArgs(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--account-id", "account-456",
+		"extra",
+	)
+
+	if err == nil {
+		t.Fatal("config set-defaults accepted an extra argument")
+	}
+	if store.updateCalled {
+		t.Fatal("config set-defaults updated config after argument validation failure")
+	}
+}
+
+func TestConfigSetDefaultsRejectsNoIDs(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd, "config", "set-defaults")
+
+	if err == nil {
+		t.Fatal("config set-defaults accepted no IDs")
+	}
+	if !strings.Contains(err.Error(), "at least one default value is required") {
+		t.Fatalf("expected missing default error, got %q", err.Error())
+	}
+	if store.updateCalled {
+		t.Fatal("config set-defaults updated config after validation failure")
+	}
+}
+
+func TestConfigSetDefaultsRejectsNameWithoutRelatedDefault(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--budget-name", "Household",
+	)
+
+	if err == nil {
+		t.Fatal("config set-defaults accepted budget name without a budget ID")
+	}
+	if !strings.Contains(err.Error(), "--budget-name requires --budget-id or an existing default budget") {
+		t.Fatalf("expected budget-name relationship error, got %q", err.Error())
+	}
+	if store.updateCalled {
+		t.Fatal("config set-defaults updated config after validation failure")
+	}
+}
+
+func TestConfigSetDefaultsRejectsAccountNameWithoutRelatedDefault(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--account-name", "Checking",
+	)
+
+	if err == nil {
+		t.Fatal("config set-defaults accepted account name without an account ID")
+	}
+	if !strings.Contains(err.Error(), "--account-name requires --account-id or an existing default account") {
+		t.Fatalf("expected account-name relationship error, got %q", err.Error())
+	}
+	if store.updateCalled {
+		t.Fatal("config set-defaults updated config after validation failure")
+	}
+}
+
+func TestConfigSetDefaultsCanUpdateNameWhenRelatedDefaultExists(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{
+		config: localconfig.Config{DefaultBudgetID: "budget-123"},
+	}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--budget-name", "Household",
+	)
+
+	if err != nil {
+		t.Fatalf("config set-defaults returned error: %v", err)
+	}
+	want := localconfig.Config{DefaultBudgetName: "Household"}
+	if store.update != want {
+		t.Fatalf("expected update %#v, got %#v", want, store.update)
+	}
+}
+
+func TestConfigSetDefaultsCanUpdateAccountNameWhenRelatedDefaultExists(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{
+		config: localconfig.Config{DefaultAccountID: "account-123"},
+	}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--account-name", "Checking",
+	)
+
+	if err != nil {
+		t.Fatalf("config set-defaults returned error: %v", err)
+	}
+	want := localconfig.Config{DefaultAccountName: "Checking"}
+	if store.update != want {
+		t.Fatalf("expected update %#v, got %#v", want, store.update)
+	}
+}
+
+func TestConfigUnavailableStoreReturnsInitError(t *testing.T) {
+	initErr := errors.New("init config failed")
+	store := unavailableConfigStore{err: initErr}
+
+	_, loadErr := store.Load()
+	if !errors.Is(loadErr, initErr) {
+		t.Fatalf("expected load error %v, got %v", initErr, loadErr)
+	}
+
+	_, updateErr := store.Update(localconfig.Config{DefaultAccountID: "account-456"})
+	if !errors.Is(updateErr, initErr) {
+		t.Fatalf("expected update error %v, got %v", initErr, updateErr)
+	}
+}
+
 func commandWithFakeClient(out io.Writer, client ynabClient) *cobra.Command {
 	return newRootCommandWithDeps(out, out, cliDeps{
 		tokenResolver: fakeTokenResolver{token: "secret-token", source: auth.SourceEnv},
@@ -542,6 +922,20 @@ func commandWithFakeClient(out io.Writer, client ynabClient) *cobra.Command {
 			return client
 		},
 	})
+}
+
+func commandWithFakeClientAndConfig(out io.Writer, client ynabClient, cfg localconfig.Config) *cobra.Command {
+	return newRootCommandWithDeps(out, out, cliDeps{
+		configStore:   fakeConfigStoreValue(cfg),
+		tokenResolver: fakeTokenResolver{token: "secret-token", source: auth.SourceEnv},
+		ynabClientFactory: func(token string) ynabClient {
+			return client
+		},
+	})
+}
+
+func fakeConfigStoreValue(cfg localconfig.Config) *fakeConfigStore {
+	return &fakeConfigStore{config: cfg}
 }
 
 func executeCommand(cmd *cobra.Command, args ...string) error {
@@ -582,6 +976,42 @@ func (s *fakeTokenStore) Set(_ context.Context, token string) error {
 	}
 	s.token = token
 	return nil
+}
+
+type fakeConfigStore struct {
+	config       localconfig.Config
+	loadErr      error
+	updateErr    error
+	update       localconfig.Config
+	updateCalled bool
+}
+
+func (s *fakeConfigStore) Load() (localconfig.Config, error) {
+	if s.loadErr != nil {
+		return localconfig.Config{}, s.loadErr
+	}
+	return s.config, nil
+}
+
+func (s *fakeConfigStore) Update(update localconfig.Config) (localconfig.Config, error) {
+	if s.updateErr != nil {
+		return localconfig.Config{}, s.updateErr
+	}
+	s.update = update
+	s.updateCalled = true
+	if update.DefaultBudgetID != "" {
+		s.config.DefaultBudgetID = update.DefaultBudgetID
+	}
+	if update.DefaultBudgetName != "" {
+		s.config.DefaultBudgetName = update.DefaultBudgetName
+	}
+	if update.DefaultAccountID != "" {
+		s.config.DefaultAccountID = update.DefaultAccountID
+	}
+	if update.DefaultAccountName != "" {
+		s.config.DefaultAccountName = update.DefaultAccountName
+	}
+	return s.config, nil
 }
 
 type fakeYNABClient struct {
