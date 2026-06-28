@@ -834,6 +834,28 @@ func TestConfigSetDefaultsRejectsNameWithoutRelatedDefault(t *testing.T) {
 	}
 }
 
+func TestConfigSetDefaultsRejectsAccountNameWithoutRelatedDefault(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--account-name", "Checking",
+	)
+
+	if err == nil {
+		t.Fatal("config set-defaults accepted account name without an account ID")
+	}
+	if !strings.Contains(err.Error(), "--account-name requires --account-id or an existing default account") {
+		t.Fatalf("expected account-name relationship error, got %q", err.Error())
+	}
+	if store.updateCalled {
+		t.Fatal("config set-defaults updated config after validation failure")
+	}
+}
+
 func TestConfigSetDefaultsCanUpdateNameWhenRelatedDefaultExists(t *testing.T) {
 	var out bytes.Buffer
 	store := &fakeConfigStore{
@@ -851,6 +873,28 @@ func TestConfigSetDefaultsCanUpdateNameWhenRelatedDefaultExists(t *testing.T) {
 		t.Fatalf("config set-defaults returned error: %v", err)
 	}
 	want := localconfig.Config{DefaultBudgetName: "Household"}
+	if store.update != want {
+		t.Fatalf("expected update %#v, got %#v", want, store.update)
+	}
+}
+
+func TestConfigSetDefaultsCanUpdateAccountNameWhenRelatedDefaultExists(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{
+		config: localconfig.Config{DefaultAccountID: "account-123"},
+	}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--account-name", "Checking",
+	)
+
+	if err != nil {
+		t.Fatalf("config set-defaults returned error: %v", err)
+	}
+	want := localconfig.Config{DefaultAccountName: "Checking"}
 	if store.update != want {
 		t.Fatalf("expected update %#v, got %#v", want, store.update)
 	}
