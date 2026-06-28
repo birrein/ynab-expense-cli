@@ -57,10 +57,10 @@ You can store local default IDs outside the repository:
 
 ```sh
 ynab-expense config set-defaults \
-  --budget-id e8038248-d795-488d-93a1-2aadc4edb98d \
+  --budget-id budget-id \
   --budget-name "Default budget" \
-  --account-id 93e8e6dc-b70a-46ad-8c0a-63de83f50acf \
-  --account-name "BCH Crédito CLP 7481"
+  --account-id account-id \
+  --account-name "Credit card"
 ```
 
 The config file lives at:
@@ -68,6 +68,8 @@ The config file lives at:
 ```text
 ~/.config/ynab-expense/config.json
 ```
+
+If `XDG_CONFIG_HOME` is set, the CLI uses `$XDG_CONFIG_HOME/ynab-expense/config.json`.
 
 Show the current config:
 

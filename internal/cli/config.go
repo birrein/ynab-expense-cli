@@ -67,14 +67,26 @@ func (a *App) newConfigSetDefaultsCommand() *cobra.Command {
 			accountID = strings.TrimSpace(accountID)
 			accountName = strings.TrimSpace(accountName)
 
-			if budgetID == "" && accountID == "" {
-				return errors.New("at least one default value is required")
-			}
 			if a.deps.configStore == nil {
 				return errors.New("config store is unavailable")
 			}
 
-			_, err := a.deps.configStore.Update(localconfig.Config{
+			cfg, err := a.loadConfig()
+			if err != nil {
+				return err
+			}
+
+			if budgetID == "" && accountID == "" && budgetName == "" && accountName == "" {
+				return errors.New("at least one default value is required")
+			}
+			if budgetName != "" && budgetID == "" && cfg.DefaultBudgetID == "" {
+				return errors.New("--budget-name requires --budget-id or an existing default budget")
+			}
+			if accountName != "" && accountID == "" && cfg.DefaultAccountID == "" {
+				return errors.New("--account-name requires --account-id or an existing default account")
+			}
+
+			_, err = a.deps.configStore.Update(localconfig.Config{
 				DefaultBudgetID:    budgetID,
 				DefaultBudgetName:  budgetName,
 				DefaultAccountID:   accountID,

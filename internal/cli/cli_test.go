@@ -799,12 +799,7 @@ func TestConfigSetDefaultsRejectsNoIDs(t *testing.T) {
 	store := &fakeConfigStore{}
 	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
 
-	err := executeCommand(cmd,
-		"config",
-		"set-defaults",
-		"--budget-name", "Household",
-		"--account-name", "Checking",
-	)
+	err := executeCommand(cmd, "config", "set-defaults")
 
 	if err == nil {
 		t.Fatal("config set-defaults accepted no IDs")
@@ -814,6 +809,50 @@ func TestConfigSetDefaultsRejectsNoIDs(t *testing.T) {
 	}
 	if store.updateCalled {
 		t.Fatal("config set-defaults updated config after validation failure")
+	}
+}
+
+func TestConfigSetDefaultsRejectsNameWithoutRelatedDefault(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--budget-name", "Household",
+	)
+
+	if err == nil {
+		t.Fatal("config set-defaults accepted budget name without a budget ID")
+	}
+	if !strings.Contains(err.Error(), "--budget-name requires --budget-id or an existing default budget") {
+		t.Fatalf("expected budget-name relationship error, got %q", err.Error())
+	}
+	if store.updateCalled {
+		t.Fatal("config set-defaults updated config after validation failure")
+	}
+}
+
+func TestConfigSetDefaultsCanUpdateNameWhenRelatedDefaultExists(t *testing.T) {
+	var out bytes.Buffer
+	store := &fakeConfigStore{
+		config: localconfig.Config{DefaultBudgetID: "budget-123"},
+	}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{configStore: store})
+
+	err := executeCommand(cmd,
+		"config",
+		"set-defaults",
+		"--budget-name", "Household",
+	)
+
+	if err != nil {
+		t.Fatalf("config set-defaults returned error: %v", err)
+	}
+	want := localconfig.Config{DefaultBudgetName: "Household"}
+	if store.update != want {
+		t.Fatalf("expected update %#v, got %#v", want, store.update)
 	}
 }
 
