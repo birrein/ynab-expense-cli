@@ -133,6 +133,66 @@ ynab-expense add \
   --dry-run
 ```
 
+You can also keep an expense in a local JSON file and pass it with `--file`.
+
+Simple expense file:
+
+```json
+{
+  "budget": "budget-id",
+  "account_id": "account-id",
+  "date": "2026-06-20",
+  "amount": 6300,
+  "currency": "CLP",
+  "payee": "Store",
+  "category_id": "category-id",
+  "memo": "Groceries"
+}
+```
+
+Preview it:
+
+```sh
+ynab-expense add --file simple-expense.json --dry-run
+```
+
+Split expense file:
+
+```json
+{
+  "budget": "budget-id",
+  "account_id": "account-id",
+  "date": "2026-06-26",
+  "amount": 10990,
+  "currency": "CLP",
+  "payee": "Main Merchant",
+  "memo": "Split payment example",
+  "splits": [
+    {
+      "amount": 10000,
+      "payee": "Main Merchant",
+      "category_id": "primary-category-id",
+      "memo": "Primary charge"
+    },
+    {
+      "amount": 990,
+      "payee": "Payment Processor",
+      "category_id": "fee-category-id",
+      "memo": "Processing fee"
+    }
+  ]
+}
+```
+
+Preview it:
+
+```sh
+ynab-expense add --file split-expense.json --dry-run
+```
+
+Only `--commit` writes the file-based expense to YNAB. Keep personal expense JSON files out of git.
+File input can omit `budget` and `account_id` only when local defaults are configured.
+
 Write the expense only when you pass `--commit`:
 
 ```sh
@@ -175,6 +235,8 @@ For USD, `12990` is interpreted as 12,990 dollars, not 12.99 dollars.
 - Tokens are never printed by CLI status or save commands.
 - Tokens are not accepted through argv; use the secure prompt or `--token-stdin`.
 - `add` does not write without `--commit`.
+- `add --file` supports simple and split expenses, but still does not write without `--commit`.
+- Personal expense JSON files can contain account, category, and merchant details; keep them out of git.
 - Generated `import_id` values are stable for retries to reduce duplicate transactions.
 - New transactions are `uncleared`, unapproved, and include `source=ynab-expense-cli` in the memo.
 - This MVP only supports expenses. It does not support inflows.
@@ -209,7 +271,6 @@ Verify dry-run examples:
 ### TODOs
 
 - [ ] Add a transaction update/edit command for existing expenses, including changing category and memo after creation.
-- [ ] Add split transaction support so one card charge can be divided across multiple categories and payees.
 - [ ] Evaluate whether the project architecture should evolve to support more features as the CLI grows.
 
 ### Technical Debt
