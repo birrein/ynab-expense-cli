@@ -1027,6 +1027,34 @@ func TestEditDryRunPrintsBeforeAndPatch(t *testing.T) {
 	}
 }
 
+func TestEditRejectsBadTransactionResponse(t *testing.T) {
+	cases := map[string]string{
+		"null transaction": `{"data":{"transaction":null}}`,
+		"missing id":       `{"data":{"transaction":{}}}`,
+		"blank id":         `{"data":{"transaction":{"id":"   "}}}`,
+		"missing property": `{"data":{}}`,
+	}
+
+	for name, response := range cases {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			client := &fakeYNABClient{
+				getTransactionResponse: []byte(response),
+			}
+			cmd := commandWithFakeClient(&out, client)
+
+			err := executeCommand(cmd, "edit", "--id", "tx-123", "--memo", "Uber One")
+
+			if err == nil {
+				t.Fatal("edit accepted bad transaction response")
+			}
+			if !strings.Contains(err.Error(), "transaction response missing transaction") {
+				t.Fatalf("expected transaction response error, got %q", err.Error())
+			}
+		})
+	}
+}
+
 func TestEditCommitPatchesTransaction(t *testing.T) {
 	var out bytes.Buffer
 	client := &fakeYNABClient{

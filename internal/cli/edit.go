@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -173,14 +174,18 @@ func parseTransactionResponse(body []byte) (rawTransaction, json.RawMessage, err
 	if err := json.Unmarshal(body, &wrapper); err != nil {
 		return rawTransaction{}, nil, err
 	}
-	if len(wrapper.Data.Transaction) == 0 {
+	raw := bytes.TrimSpace(wrapper.Data.Transaction)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return rawTransaction{}, nil, fmt.Errorf("transaction response missing transaction")
 	}
 	var tx rawTransaction
-	if err := json.Unmarshal(wrapper.Data.Transaction, &tx); err != nil {
+	if err := json.Unmarshal(raw, &tx); err != nil {
 		return rawTransaction{}, nil, err
 	}
-	return tx, wrapper.Data.Transaction, nil
+	if strings.TrimSpace(tx.ID) == "" {
+		return rawTransaction{}, nil, fmt.Errorf("transaction response missing transaction")
+	}
+	return tx, raw, nil
 }
 
 func buildSimpleEditPatch(cmd *cobra.Command, opts editOptions) (transactions.PatchTransaction, error) {
