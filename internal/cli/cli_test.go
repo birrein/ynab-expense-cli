@@ -1055,6 +1055,29 @@ func TestEditRejectsBadTransactionResponse(t *testing.T) {
 	}
 }
 
+func TestEditCommitRejectsMismatchedFetchedTransactionID(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getTransactionResponse: []byte(`{"data":{"transaction":{"id":"other-tx","account_id":"account-1","date":"2026-06-27","amount":-3990000,"payee_name":"Uber","subtransactions":[]}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--memo", "Uber One", "--commit")
+
+	if err == nil {
+		t.Fatal("edit accepted mismatched fetched transaction id")
+	}
+	if !strings.Contains(err.Error(), `fetched transaction id "other-tx" does not match requested id "tx-123"`) {
+		t.Fatalf("expected mismatched transaction id error, got %q", err.Error())
+	}
+	if client.patchTransactionsBudget != "" {
+		t.Fatalf("patch budget = %q, want empty", client.patchTransactionsBudget)
+	}
+	if len(client.patchTransactionsPayload.Transactions) != 0 {
+		t.Fatalf("patch payload = %#v, want empty", client.patchTransactionsPayload)
+	}
+}
+
 func TestEditCommitPatchesTransaction(t *testing.T) {
 	var out bytes.Buffer
 	client := &fakeYNABClient{

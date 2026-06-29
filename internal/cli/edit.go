@@ -39,12 +39,6 @@ type editDryRunOutput struct {
 	Patch         transactions.PatchTransaction `json:"patch"`
 }
 
-type transactionResponse struct {
-	Data struct {
-		Transaction rawTransaction `json:"transaction"`
-	} `json:"data"`
-}
-
 type rawTransaction struct {
 	ID              string            `json:"id"`
 	AccountID       string            `json:"account_id"`
@@ -111,9 +105,12 @@ func (a *App) runEdit(cmd *cobra.Command, opts editOptions) error {
 	if err != nil {
 		return err
 	}
-	_, rawBefore, err := parseTransactionResponse(body)
+	fetchedTx, rawBefore, err := parseTransactionResponse(body)
 	if err != nil {
 		return err
+	}
+	if fetchedTx.ID != opts.id {
+		return fmt.Errorf("fetched transaction id %q does not match requested id %q", fetchedTx.ID, opts.id)
 	}
 	if !opts.commit {
 		preview, err := json.MarshalIndent(editDryRunOutput{
