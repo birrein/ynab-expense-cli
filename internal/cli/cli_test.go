@@ -894,6 +894,48 @@ func TestAddFileCommitSendsSplitTransaction(t *testing.T) {
 	}
 }
 
+func TestEditRejectsMissingID(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--memo", "Uber One")
+
+	if err == nil {
+		t.Fatal("edit accepted missing id")
+	}
+	if !strings.Contains(err.Error(), "--id is required") {
+		t.Fatalf("expected id required error, got %q", err.Error())
+	}
+}
+
+func TestEditRejectsNoEditFields(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123")
+
+	if err == nil {
+		t.Fatal("edit accepted no edit fields")
+	}
+	if !strings.Contains(err.Error(), "at least one edit field is required") {
+		t.Fatalf("expected edit field error, got %q", err.Error())
+	}
+}
+
+func TestEditRejectsDryRunAndCommitTogether(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--memo", "Uber One", "--dry-run", "--commit")
+
+	if err == nil {
+		t.Fatal("edit accepted --dry-run with --commit")
+	}
+	if !strings.Contains(err.Error(), "--dry-run cannot be used with --commit") {
+		t.Fatalf("expected dry-run conflict error, got %q", err.Error())
+	}
+}
+
 func writeCLIExpenseFile(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "expense.json")
@@ -1248,9 +1290,20 @@ type fakeYNABClient struct {
 	transactionsSince         string
 	transactionsUntil         string
 	transactionsResponse      []byte
+	getTransactionBudget      string
+	getTransactionID          string
+	getTransactionResponse    []byte
 	createTransactionBudget   string
 	createTransactionPayload  transactions.PostTransactionRequest
 	createTransactionResponse []byte
+	patchTransactionsBudget   string
+	patchTransactionsPayload  transactions.PatchTransactionsRequest
+	patchTransactionsResponse []byte
+	deleteTransactionBudget   string
+	deleteTransactionID       string
+	deleteTransactionResponse []byte
+	createTransactionErr      error
+	deleteTransactionErr      error
 	err                       error
 }
 
@@ -1288,11 +1341,44 @@ func (c *fakeYNABClient) GetTransactions(_ context.Context, budget string, since
 	return c.transactionsResponse, nil
 }
 
+func (c *fakeYNABClient) GetTransaction(_ context.Context, budget string, transactionID string) ([]byte, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.getTransactionBudget = budget
+	c.getTransactionID = transactionID
+	return c.getTransactionResponse, nil
+}
+
 func (c *fakeYNABClient) CreateTransaction(_ context.Context, budget string, payload transactions.PostTransactionRequest) ([]byte, error) {
+	if c.createTransactionErr != nil {
+		return nil, c.createTransactionErr
+	}
 	if c.err != nil {
 		return nil, c.err
 	}
 	c.createTransactionBudget = budget
 	c.createTransactionPayload = payload
 	return c.createTransactionResponse, nil
+}
+
+func (c *fakeYNABClient) PatchTransactions(_ context.Context, budget string, payload transactions.PatchTransactionsRequest) ([]byte, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.patchTransactionsBudget = budget
+	c.patchTransactionsPayload = payload
+	return c.patchTransactionsResponse, nil
+}
+
+func (c *fakeYNABClient) DeleteTransaction(_ context.Context, budget string, transactionID string) ([]byte, error) {
+	if c.deleteTransactionErr != nil {
+		return nil, c.deleteTransactionErr
+	}
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.deleteTransactionBudget = budget
+	c.deleteTransactionID = transactionID
+	return c.deleteTransactionResponse, nil
 }
