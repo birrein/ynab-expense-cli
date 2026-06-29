@@ -324,9 +324,6 @@ Verify dry-run examples:
 ./ynab-expense add --budget default --account-id account-1 --amount 12.99 --currency USD --payee "Store" --date 2026-06-05 --dry-run
 ```
 
-### TODOs
-
-- [ ] Add a transaction update/edit command for existing expenses, including changing category and memo after creation.
 - [ ] Evaluate whether the project architecture should evolve to support more features as the CLI grows.
 
 ### Technical Debt
