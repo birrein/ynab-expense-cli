@@ -39,6 +39,24 @@ type editDryRunOutput struct {
 	Patch         transactions.PatchTransaction `json:"patch"`
 }
 
+type replaceSplitDryRunOutput struct {
+	DryRun                bool                                `json:"dry_run"`
+	Budget                string                              `json:"budget"`
+	Operation             string                              `json:"operation"`
+	Warning               string                              `json:"warning"`
+	OriginalTransactionID string                              `json:"original_transaction_id"`
+	Original              json.RawMessage                     `json:"original"`
+	ReplacementPayload    transactions.PostTransactionRequest `json:"replacement_payload"`
+}
+
+type replaceSplitCommitOutput struct {
+	Operation            string          `json:"operation"`
+	DeletedTransactionID string          `json:"deleted_transaction_id"`
+	CreatedTransactionID string          `json:"created_transaction_id"`
+	CreatedTransaction   json.RawMessage `json:"created_transaction"`
+	DeleteResponse       json.RawMessage `json:"delete_response"`
+}
+
 type rawTransaction struct {
 	ID              string            `json:"id"`
 	AccountID       string            `json:"account_id"`
@@ -185,6 +203,30 @@ func parseTransactionResponse(body []byte) (rawTransaction, json.RawMessage, err
 	return tx, raw, nil
 }
 
+func createdTransactionFromResponse(body []byte) (string, json.RawMessage, error) {
+	var wrapper struct {
+		Data struct {
+			Transaction json.RawMessage `json:"transaction"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &wrapper); err != nil {
+		return "", nil, err
+	}
+	if len(wrapper.Data.Transaction) == 0 {
+		return "", nil, fmt.Errorf("create transaction response missing transaction")
+	}
+	var tx struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(wrapper.Data.Transaction, &tx); err != nil {
+		return "", nil, err
+	}
+	if strings.TrimSpace(tx.ID) == "" {
+		return "", nil, fmt.Errorf("create transaction response missing transaction id")
+	}
+	return tx.ID, wrapper.Data.Transaction, nil
+}
+
 func buildSimpleEditPatch(cmd *cobra.Command, opts editOptions) (transactions.PatchTransaction, error) {
 	input := transactions.PatchInput{ID: opts.id}
 	if cmd.Flags().Changed("account-id") {
@@ -232,7 +274,131 @@ func buildSimpleEditPatch(cmd *cobra.Command, opts editOptions) (transactions.Pa
 }
 
 func (a *App) runReplaceSplitEdit(cmd *cobra.Command, opts editOptions) error {
-	return fmt.Errorf("replace-split edit is not implemented")
+	if err := validateReplaceSplitFlags(cmd, opts); err != nil {
+		return err
+	}
+	fileInput, err := loadAddFileInput(opts.filePath)
+	if err != nil {
+		return err
+	}
+	normalized, err := normalizeAddFileInput(fileInput)
+	if err != nil {
+		return err
+	}
+	if len(normalized.Splits) == 0 {
+		return fmt.Errorf("splits are required for --replace-split")
+	}
+
+	resolvedBudget, err := a.resolveBudget(cmd, opts.budget)
+	if err != nil {
+		return err
+	}
+	if normalized.ExplicitBudget {
+		resolvedBudget, err = a.resolveBudgetFromValue(cmd, normalized.Budget, true)
+		if err != nil {
+			return err
+		}
+	}
+	normalized.Budget = resolvedBudget
+
+	client, err := a.clientForCommand(cmd)
+	if err != nil {
+		return err
+	}
+	body, err := client.GetTransaction(cmd.Context(), resolvedBudget, opts.id)
+	if err != nil {
+		return err
+	}
+	original, rawOriginal, err := parseTransactionResponse(body)
+	if err != nil {
+		return err
+	}
+	if original.ID != opts.id {
+		return fmt.Errorf("fetched transaction id %q does not match requested id %q", original.ID, opts.id)
+	}
+	if normalized.ExplicitAccount {
+		accountID, err := a.resolveAccountIDFromValue(normalized.AccountID, true)
+		if err != nil {
+			return err
+		}
+		normalized.AccountID = accountID
+	} else {
+		if strings.TrimSpace(original.AccountID) == "" {
+			return fmt.Errorf("original transaction response missing account_id")
+		}
+		normalized.AccountID = strings.TrimSpace(original.AccountID)
+	}
+
+	input, err := validateAddInput(normalized.addInput)
+	if err != nil {
+		return err
+	}
+	payload := transactions.PostTransactionRequest{
+		Transaction: transactions.BuildExpense(transactions.Input{
+			AccountID:        input.AccountID,
+			Date:             input.Date,
+			AmountMilliunits: normalized.AmountMilliunits,
+			PayeeName:        input.Payee,
+			CategoryID:       input.CategoryID,
+			Memo:             input.Memo,
+			Splits:           normalized.Splits,
+		}),
+	}
+	if !opts.commit {
+		preview, err := json.MarshalIndent(replaceSplitDryRunOutput{
+			DryRun:                true,
+			Budget:                resolvedBudget,
+			Operation:             "replace_split",
+			Warning:               "commit will create a replacement transaction and delete the original transaction",
+			OriginalTransactionID: opts.id,
+			Original:              rawOriginal,
+			ReplacementPayload:    payload,
+		}, "", "  ")
+		if err != nil {
+			return err
+		}
+		return a.writeJSON(preview)
+	}
+	return a.commitReplaceSplit(cmd, client, resolvedBudget, opts.id, payload)
+}
+
+func validateReplaceSplitFlags(cmd *cobra.Command, opts editOptions) error {
+	if cmd.Flags().Changed("file") && !opts.replaceSplit {
+		return fmt.Errorf("--file requires --replace-split")
+	}
+	if opts.replaceSplit && !cmd.Flags().Changed("file") {
+		return fmt.Errorf("--replace-split requires --file")
+	}
+	if changed := editDetailFlagsChanged(cmd); len(changed) > 0 {
+		return fmt.Errorf("--file cannot be combined with transaction detail flags: %s", strings.Join(changed, ", "))
+	}
+	return nil
+}
+
+func (a *App) commitReplaceSplit(cmd *cobra.Command, client ynabClient, budget string, originalID string, payload transactions.PostTransactionRequest) error {
+	createBody, err := client.CreateTransaction(cmd.Context(), budget, payload)
+	if err != nil {
+		return err
+	}
+	createdID, createdTransaction, err := createdTransactionFromResponse(createBody)
+	if err != nil {
+		return err
+	}
+	deleteBody, err := client.DeleteTransaction(cmd.Context(), budget, originalID)
+	if err != nil {
+		return fmt.Errorf("replacement transaction %s was created, but original transaction %s could not be deleted: %w", createdID, originalID, err)
+	}
+	body, err := json.MarshalIndent(replaceSplitCommitOutput{
+		Operation:            "replace_split",
+		DeletedTransactionID: originalID,
+		CreatedTransactionID: createdID,
+		CreatedTransaction:   createdTransaction,
+		DeleteResponse:       json.RawMessage(deleteBody),
+	}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return a.writeJSON(body)
 }
 
 func editDetailFlagsChanged(cmd *cobra.Command) []string {

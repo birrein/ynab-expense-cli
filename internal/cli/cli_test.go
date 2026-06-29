@@ -1122,6 +1122,194 @@ func TestEditCommitPatchesTransaction(t *testing.T) {
 	}
 }
 
+func TestEditFileRequiresReplaceSplit(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{"date":"2026-06-28","amount":1000,"payee":"Store","category_id":"category"}`)
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--file", path)
+
+	if err == nil {
+		t.Fatal("edit accepted --file without --replace-split")
+	}
+	if !strings.Contains(err.Error(), "--file requires --replace-split") {
+		t.Fatalf("expected file requires replace-split error, got %q", err.Error())
+	}
+}
+
+func TestEditReplaceSplitRequiresFile(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--replace-split")
+
+	if err == nil {
+		t.Fatal("edit accepted --replace-split without --file")
+	}
+	if !strings.Contains(err.Error(), "--replace-split requires --file") {
+		t.Fatalf("expected replace-split requires file error, got %q", err.Error())
+	}
+}
+
+func TestEditReplaceSplitRejectsDetailFlags(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-28",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--file", path, "--replace-split", "--memo", "new memo")
+
+	if err == nil {
+		t.Fatal("edit accepted detail flags with replace-split file")
+	}
+	if !strings.Contains(err.Error(), "--file cannot be combined with transaction detail flags") {
+		t.Fatalf("expected mixed input error, got %q", err.Error())
+	}
+}
+
+func TestEditReplaceSplitDryRunInheritsOriginalAccount(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-28",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"memo": "Corrected split",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	client := &fakeYNABClient{
+		getTransactionResponse: []byte(`{"data":{"transaction":{"id":"tx-123","account_id":"original-account","date":"2026-06-28","amount":-10990000,"payee_name":"Main Merchant","subtransactions":[{"id":"sub-1"}]}}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID:  "budget-config",
+		DefaultAccountID: "default-account",
+	})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--file", path, "--replace-split")
+
+	if err != nil {
+		t.Fatalf("replace-split dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"operation": "replace_split"`,
+		`"warning": "commit will create a replacement transaction and delete the original transaction"`,
+		`"original_transaction_id": "tx-123"`,
+		`"account_id": "original-account"`,
+		`"subtransactions"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("replace-split output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestEditReplaceSplitCommitCreatesBeforeDeleting(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-28",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	client := &fakeYNABClient{
+		getTransactionResponse:    []byte(`{"data":{"transaction":{"id":"old-tx","account_id":"original-account","subtransactions":[{"id":"sub-1"}]}}}`),
+		createTransactionResponse: []byte(`{"data":{"transaction":{"id":"new-tx"}}}`),
+		deleteTransactionResponse: []byte(`{"data":{"transaction":{"id":"old-tx","deleted":true}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "edit", "--budget", "default", "--id", "old-tx", "--file", path, "--replace-split", "--commit")
+
+	if err != nil {
+		t.Fatalf("replace-split commit returned error: %v", err)
+	}
+	if client.createTransactionBudget != "default" {
+		t.Fatalf("create budget = %q, want default", client.createTransactionBudget)
+	}
+	if client.deleteTransactionID != "old-tx" {
+		t.Fatalf("delete id = %q, want old-tx", client.deleteTransactionID)
+	}
+	if client.createTransactionPayload.Transaction.AccountID != "original-account" {
+		t.Fatalf("replacement account = %q", client.createTransactionPayload.Transaction.AccountID)
+	}
+	output := out.String()
+	for _, want := range []string{`"operation": "replace_split"`, `"created_transaction_id": "new-tx"`, `"deleted_transaction_id": "old-tx"`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestEditReplaceSplitCreateFailureDoesNotDeleteOriginal(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-28",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	client := &fakeYNABClient{
+		getTransactionResponse: []byte(`{"data":{"transaction":{"id":"old-tx","account_id":"original-account","subtransactions":[{"id":"sub-1"}]}}}`),
+		createTransactionErr:   errors.New("create failed"),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "edit", "--id", "old-tx", "--file", path, "--replace-split", "--commit")
+
+	if err == nil {
+		t.Fatal("replace-split commit returned nil error after create failure")
+	}
+	if client.deleteTransactionID != "" {
+		t.Fatalf("delete was called for %q after create failure", client.deleteTransactionID)
+	}
+}
+
+func TestEditReplaceSplitDeleteFailureReportsBothIDs(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-28",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	client := &fakeYNABClient{
+		getTransactionResponse:    []byte(`{"data":{"transaction":{"id":"old-tx","account_id":"original-account","subtransactions":[{"id":"sub-1"}]}}}`),
+		createTransactionResponse: []byte(`{"data":{"transaction":{"id":"new-tx"}}}`),
+		deleteTransactionErr:      errors.New("delete failed"),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "edit", "--id", "old-tx", "--file", path, "--replace-split", "--commit")
+
+	if err == nil {
+		t.Fatal("replace-split commit returned nil error after delete failure")
+	}
+	for _, want := range []string{"new-tx", "old-tx", "delete failed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
 func writeCLIExpenseFile(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "expense.json")
