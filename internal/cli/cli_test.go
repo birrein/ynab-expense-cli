@@ -936,6 +936,141 @@ func TestEditRejectsDryRunAndCommitTogether(t *testing.T) {
 	}
 }
 
+func TestEditRejectsCurrencyWithoutAmount(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--currency", "USD", "--memo", "Uber One")
+
+	if err == nil {
+		t.Fatal("edit accepted currency without amount")
+	}
+	if !strings.Contains(err.Error(), "--currency requires --amount") {
+		t.Fatalf("expected currency error, got %q", err.Error())
+	}
+}
+
+func TestEditRejectsInvalidDate(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--date", "2026-02-31")
+
+	if err == nil {
+		t.Fatal("edit accepted invalid date")
+	}
+	if !strings.Contains(err.Error(), "--date must be YYYY-MM-DD") {
+		t.Fatalf("expected date error, got %q", err.Error())
+	}
+}
+
+func TestEditRejectsInvalidClearedStatus(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--cleared", "maybe")
+
+	if err == nil {
+		t.Fatal("edit accepted invalid cleared status")
+	}
+	if !strings.Contains(err.Error(), "--cleared must be one of: cleared, uncleared, reconciled") {
+		t.Fatalf("expected cleared error, got %q", err.Error())
+	}
+}
+
+func TestEditDryRunRequiresToken(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: fakeTokenResolver{err: auth.ErrTokenNotFound},
+	})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--memo", "Uber One")
+
+	if err == nil {
+		t.Fatal("edit dry-run returned nil error without token")
+	}
+	if !strings.Contains(err.Error(), "No YNAB token found") {
+		t.Fatalf("expected missing-token error, got %q", err.Error())
+	}
+}
+
+func TestEditDryRunPrintsBeforeAndPatch(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getTransactionResponse: []byte(`{"data":{"transaction":{"id":"tx-123","account_id":"account-1","date":"2026-06-27","amount":-3990000,"payee_name":"Uber","category_id":"transportation","memo":"old memo","subtransactions":[]}}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{DefaultBudgetID: "budget-config"})
+
+	err := executeCommand(cmd, "edit", "--id", " tx-123 ", "--memo", " Uber One ", "--category-id", " monthly-subscriptions ")
+
+	if err != nil {
+		t.Fatalf("edit dry-run returned error: %v", err)
+	}
+	if client.getTransactionBudget != "budget-config" {
+		t.Fatalf("budget = %q, want budget-config", client.getTransactionBudget)
+	}
+	if client.getTransactionID != "tx-123" {
+		t.Fatalf("transaction id = %q, want tx-123", client.getTransactionID)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"dry_run": true`,
+		`"operation": "edit"`,
+		`"before"`,
+		`"patch"`,
+		`"category_id": "monthly-subscriptions"`,
+		`"memo": "Uber One"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("edit output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestEditCommitPatchesTransaction(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getTransactionResponse:    []byte(`{"data":{"transaction":{"id":"tx-123","account_id":"account-1","date":"2026-06-27","amount":-3990000,"payee_name":"Uber","subtransactions":[]}}}`),
+		patchTransactionsResponse: []byte(`{"data":{"transaction_ids":["tx-123"]}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd,
+		"edit",
+		"--budget", " default ",
+		"--id", "tx-123",
+		"--amount", "3990",
+		"--currency", "CLP",
+		"--date", "2026-06-27",
+		"--payee", "Uber",
+		"--approved=false",
+		"--commit",
+	)
+
+	if err != nil {
+		t.Fatalf("edit commit returned error: %v", err)
+	}
+	if client.patchTransactionsBudget != "default" {
+		t.Fatalf("patch budget = %q, want default", client.patchTransactionsBudget)
+	}
+	if len(client.patchTransactionsPayload.Transactions) != 1 {
+		t.Fatalf("patch payload = %#v", client.patchTransactionsPayload)
+	}
+	patch := client.patchTransactionsPayload.Transactions[0]
+	if patch.ID != "tx-123" || patch.Date != "2026-06-27" || patch.PayeeName != "Uber" {
+		t.Fatalf("patch = %#v", patch)
+	}
+	if patch.Amount == nil || *patch.Amount != -3990000 {
+		t.Fatalf("amount = %#v, want -3990000", patch.Amount)
+	}
+	if patch.Approved == nil || *patch.Approved {
+		t.Fatalf("approved = %#v, want false", patch.Approved)
+	}
+	if !strings.Contains(out.String(), `"transaction_ids"`) {
+		t.Fatalf("edit commit output missing response JSON, got %q", out.String())
+	}
+}
+
 func writeCLIExpenseFile(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "expense.json")
