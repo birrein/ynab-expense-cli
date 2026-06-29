@@ -1,7 +1,9 @@
 package transactions
 
 import (
+	"encoding/json"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -335,5 +337,70 @@ func TestBuildExpenseWithoutSplitsKeepsSimplePayload(t *testing.T) {
 	}
 	if len(tx.Subtransactions) != 0 {
 		t.Fatalf("simple transaction has splits: %#v", tx.Subtransactions)
+	}
+}
+
+func TestBuildPatchTrimsAndIncludesExplicitFields(t *testing.T) {
+	amount := int64(-3990000)
+	categoryID := " category-monthly "
+	memo := " Uber One "
+	approved := false
+
+	patch := BuildPatch(PatchInput{
+		ID:         " tx-123 ",
+		AccountID:  " account-456 ",
+		Date:       " 2026-06-27 ",
+		Amount:     &amount,
+		PayeeName:  " Uber ",
+		CategoryID: &categoryID,
+		Memo:       &memo,
+		Cleared:    " uncleared ",
+		Approved:   &approved,
+	})
+
+	if patch.ID != "tx-123" {
+		t.Fatalf("ID = %q, want tx-123", patch.ID)
+	}
+	if patch.AccountID != "account-456" {
+		t.Fatalf("AccountID = %q, want account-456", patch.AccountID)
+	}
+	if patch.Date != "2026-06-27" {
+		t.Fatalf("Date = %q, want 2026-06-27", patch.Date)
+	}
+	if patch.Amount == nil || *patch.Amount != -3990000 {
+		t.Fatalf("Amount = %#v, want -3990000", patch.Amount)
+	}
+	if patch.PayeeName != "Uber" {
+		t.Fatalf("PayeeName = %q, want Uber", patch.PayeeName)
+	}
+	if patch.CategoryID == nil || *patch.CategoryID != "category-monthly" {
+		t.Fatalf("CategoryID = %#v, want category-monthly", patch.CategoryID)
+	}
+	if patch.Memo == nil || *patch.Memo != "Uber One" {
+		t.Fatalf("Memo = %#v, want Uber One", patch.Memo)
+	}
+	if patch.Cleared != "uncleared" {
+		t.Fatalf("Cleared = %q, want uncleared", patch.Cleared)
+	}
+	if patch.Approved == nil || *patch.Approved {
+		t.Fatalf("Approved = %#v, want false", patch.Approved)
+	}
+}
+
+func TestBuildPatchOmitsUnsetOptionalFields(t *testing.T) {
+	patch := BuildPatch(PatchInput{ID: "tx-123"})
+
+	body, err := json.Marshal(PatchTransactionsRequest{Transactions: []PatchTransaction{patch}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	for _, unwanted := range []string{"account_id", "amount", "category_id", "memo", "approved"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("patch JSON %s unexpectedly contains %s", got, unwanted)
+		}
+	}
+	if !strings.Contains(got, `"id":"tx-123"`) {
+		t.Fatalf("patch JSON %s missing id", got)
 	}
 }
