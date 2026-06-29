@@ -1245,6 +1245,9 @@ func TestEditReplaceSplitCommitCreatesBeforeDeleting(t *testing.T) {
 	if client.createTransactionPayload.Transaction.AccountID != "original-account" {
 		t.Fatalf("replacement account = %q", client.createTransactionPayload.Transaction.AccountID)
 	}
+	if got, want := strings.Join(client.writeCallOrder, ","), "create,delete"; got != want {
+		t.Fatalf("write order = %q, want %q", got, want)
+	}
 	output := out.String()
 	for _, want := range []string{`"operation": "replace_split"`, `"created_transaction_id": "new-tx"`, `"deleted_transaction_id": "old-tx"`} {
 		if !strings.Contains(output, want) {
@@ -1678,6 +1681,7 @@ type fakeYNABClient struct {
 	deleteTransactionResponse []byte
 	createTransactionErr      error
 	deleteTransactionErr      error
+	writeCallOrder            []string
 	err                       error
 }
 
@@ -1731,6 +1735,7 @@ func (c *fakeYNABClient) CreateTransaction(_ context.Context, budget string, pay
 	if c.err != nil {
 		return nil, c.err
 	}
+	c.writeCallOrder = append(c.writeCallOrder, "create")
 	c.createTransactionBudget = budget
 	c.createTransactionPayload = payload
 	return c.createTransactionResponse, nil
@@ -1752,6 +1757,7 @@ func (c *fakeYNABClient) DeleteTransaction(_ context.Context, budget string, tra
 	if c.err != nil {
 		return nil, c.err
 	}
+	c.writeCallOrder = append(c.writeCallOrder, "delete")
 	c.deleteTransactionBudget = budget
 	c.deleteTransactionID = transactionID
 	return c.deleteTransactionResponse, nil
