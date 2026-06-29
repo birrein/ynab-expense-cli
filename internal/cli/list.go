@@ -120,7 +120,11 @@ func (a *App) newTransactionsCommand() *cobra.Command {
 }
 
 func (a *App) resolveBudget(cmd *cobra.Command, budget string) (string, error) {
-	if cmd.Flags().Changed("budget") {
+	return a.resolveBudgetFromValue(cmd, budget, cmd.Flags().Changed("budget"))
+}
+
+func (a *App) resolveBudgetFromValue(cmd *cobra.Command, budget string, explicit bool) (string, error) {
+	if explicit {
 		budget = strings.TrimSpace(budget)
 		if budget == "" {
 			return "", fmt.Errorf("--budget is required")

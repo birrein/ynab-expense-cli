@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -678,6 +680,227 @@ func TestAddDefaultsCurrencyToCLP(t *testing.T) {
 	if !strings.Contains(out.String(), `"amount": -12990000`) {
 		t.Fatalf("expected CLP amount by default, got %q", out.String())
 	}
+}
+
+func TestAddFileDryRunUsesDefaultsAndIncludesSplits(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-26",
+		"amount": 10990,
+		"currency": "CLP",
+		"payee": "Main Merchant",
+		"memo": "Split payment",
+		"splits": [
+			{"amount": 10000, "payee": "Main Merchant", "category_id": "primary-category", "memo": "Primary charge"},
+			{"amount": 990, "payee": "Payment Processor", "category_id": "fee-category", "memo": "Processing fee"}
+		]
+	}`)
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		configStore: fakeConfigStoreValue(localconfig.Config{
+			DefaultBudgetID:  "budget-config",
+			DefaultAccountID: "account-config",
+		}),
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd, "add", "--file", path, "--dry-run")
+
+	if err != nil {
+		t.Fatalf("add --file dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"budget": "budget-config"`,
+		`"account_id": "account-config"`,
+		`"amount": -10990000`,
+		`"subtransactions"`,
+		`"category_id": "primary-category"`,
+		`"category_id": "fee-category"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("add --file dry-run output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestAddFileExplicitBudgetAndAccountOverrideDefaults(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"budget": "budget-file",
+		"account_id": "account-file",
+		"date": "2026-06-20",
+		"amount": 6300,
+		"payee": "Store",
+		"category_id": "category-file"
+	}`)
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		configStore: fakeConfigStoreValue(localconfig.Config{
+			DefaultBudgetID:  "budget-config",
+			DefaultAccountID: "account-config",
+		}),
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd, "add", "--file", path, "--dry-run")
+
+	if err != nil {
+		t.Fatalf("add --file dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{`"budget": "budget-file"`, `"account_id": "account-file"`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("add --file output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestAddFileRejectsDetailFlags(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-20",
+		"amount": 6300,
+		"payee": "Store",
+		"category_id": "category-file"
+	}`)
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "add", "--file", path, "--amount", "6300")
+
+	if err == nil {
+		t.Fatal("add --file accepted a detail flag")
+	}
+	if !strings.Contains(err.Error(), "--file cannot be combined with transaction detail flags") {
+		t.Fatalf("expected mixed input error, got %q", err.Error())
+	}
+}
+
+func TestAddFileRejectsExplicitBlankPath(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd, "add", "--file", "   ", "--commit")
+
+	if err == nil {
+		t.Fatal("add --file accepted an explicit blank path")
+	}
+	if !strings.Contains(err.Error(), "--file is required") {
+		t.Fatalf("expected file required error, got %q", err.Error())
+	}
+}
+
+func TestAddFileBlankPathWithDetailFlagsRejectsMixedInput(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd, "add", "--file", "   ", "--amount", "6300", "--commit")
+
+	if err == nil {
+		t.Fatal("add --file accepted detail flags with an explicit blank path")
+	}
+	if !strings.Contains(err.Error(), "--file cannot be combined with transaction detail flags") {
+		t.Fatalf("expected mixed input error, got %q", err.Error())
+	}
+}
+
+func TestAddFileExplicitBlankBudgetDoesNotUseConfigDefault(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"budget": "",
+		"date": "2026-06-20",
+		"amount": 6300,
+		"payee": "Store",
+		"category_id": "category-file"
+	}`)
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		configStore: fakeConfigStoreValue(localconfig.Config{
+			DefaultBudgetID:  "budget-config",
+			DefaultAccountID: "account-config",
+		}),
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd, "add", "--file", path, "--dry-run")
+
+	if err == nil {
+		t.Fatal("add --file accepted an explicit blank budget")
+	}
+	if !strings.Contains(err.Error(), "--budget is required") {
+		t.Fatalf("expected budget required error, got %q", err.Error())
+	}
+}
+
+func TestAddFileExplicitBlankAccountDoesNotUseConfigDefault(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"account_id": "",
+		"date": "2026-06-20",
+		"amount": 6300,
+		"payee": "Store",
+		"category_id": "category-file"
+	}`)
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		configStore: fakeConfigStoreValue(localconfig.Config{
+			DefaultBudgetID:  "budget-config",
+			DefaultAccountID: "account-config",
+		}),
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd, "add", "--file", path, "--dry-run")
+
+	if err == nil {
+		t.Fatal("add --file accepted an explicit blank account")
+	}
+	if !strings.Contains(err.Error(), "--account-id is required") {
+		t.Fatalf("expected account required error, got %q", err.Error())
+	}
+}
+
+func TestAddFileCommitSendsSplitTransaction(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"budget": "budget-file",
+		"account_id": "account-file",
+		"date": "2026-06-26",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	client := &fakeYNABClient{createTransactionResponse: []byte(`{"data":{"transaction":{"id":"tx-123"}}}`)}
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: fakeTokenResolver{token: "secret-token", source: auth.SourceEnv},
+		ynabClientFactory: func(token string) ynabClient {
+			return client
+		},
+	})
+
+	err := executeCommand(cmd, "add", "--file", path, "--commit")
+
+	if err != nil {
+		t.Fatalf("add --file --commit returned error: %v", err)
+	}
+	if client.createTransactionBudget != "budget-file" {
+		t.Fatalf("budget = %q, want budget-file", client.createTransactionBudget)
+	}
+	if len(client.createTransactionPayload.Transaction.Subtransactions) != 2 {
+		t.Fatalf("subtransactions = %#v", client.createTransactionPayload.Transaction.Subtransactions)
+	}
+}
+
+func writeCLIExpenseFile(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "expense.json")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("WriteFile returned error: %v", err)
+	}
+	return path
 }
 
 func TestConfigShowPrintsEmptyObjectWhenNoConfig(t *testing.T) {
