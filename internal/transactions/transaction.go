@@ -49,6 +49,36 @@ type PostTransactionRequest struct {
 	Transaction Transaction `json:"transaction"`
 }
 
+type PatchTransactionsRequest struct {
+	Transactions []PatchTransaction `json:"transactions"`
+}
+
+type PatchTransaction struct {
+	ID         string  `json:"id,omitempty"`
+	ImportID   string  `json:"import_id,omitempty"`
+	AccountID  string  `json:"account_id,omitempty"`
+	Date       string  `json:"date,omitempty"`
+	Amount     *int64  `json:"amount,omitempty"`
+	PayeeName  string  `json:"payee_name,omitempty"`
+	CategoryID *string `json:"category_id,omitempty"`
+	Memo       *string `json:"memo,omitempty"`
+	Cleared    string  `json:"cleared,omitempty"`
+	Approved   *bool   `json:"approved,omitempty"`
+}
+
+type PatchInput struct {
+	ID         string
+	ImportID   string
+	AccountID  string
+	Date       string
+	Amount     *int64
+	PayeeName  string
+	CategoryID *string
+	Memo       *string
+	Cleared    string
+	Approved   *bool
+}
+
 func BuildExpense(input Input) Transaction {
 	accountID := strings.TrimSpace(input.AccountID)
 	date := strings.TrimSpace(input.Date)
@@ -73,6 +103,28 @@ func BuildExpense(input Input) Transaction {
 	}
 
 	return transaction
+}
+
+func BuildPatch(input PatchInput) PatchTransaction {
+	patch := PatchTransaction{
+		ID:        strings.TrimSpace(input.ID),
+		ImportID:  strings.TrimSpace(input.ImportID),
+		AccountID: strings.TrimSpace(input.AccountID),
+		Date:      strings.TrimSpace(input.Date),
+		Amount:    input.Amount,
+		PayeeName: strings.TrimSpace(input.PayeeName),
+		Cleared:   strings.TrimSpace(input.Cleared),
+		Approved:  input.Approved,
+	}
+	if input.CategoryID != nil {
+		categoryID := strings.TrimSpace(*input.CategoryID)
+		patch.CategoryID = &categoryID
+	}
+	if input.Memo != nil {
+		memo := strings.TrimSpace(*input.Memo)
+		patch.Memo = &memo
+	}
+	return patch
 }
 
 func buildSubtransactions(splits []SplitInput) []Subtransaction {

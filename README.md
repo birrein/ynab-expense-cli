@@ -208,6 +208,62 @@ ynab-expense add \
 
 Only `--commit` writes to YNAB.
 
+## Edit Transactions
+
+`edit` reads the current YNAB transaction before writing anything. Dry-run is the default, but unlike `add`, edit dry-runs require a configured token because the CLI must fetch the existing transaction.
+
+Simple edits use flags:
+
+```sh
+ynab-expense edit \
+  --id transaction-id \
+  --memo "Uber One" \
+  --category-id category-id \
+  --dry-run
+```
+
+Write the edit only with `--commit`:
+
+```sh
+ynab-expense edit \
+  --id transaction-id \
+  --amount 3990 \
+  --currency CLP \
+  --date 2026-06-27 \
+  --memo "Uber One" \
+  --commit
+```
+
+Supported simple edit fields:
+
+- `--account-id`
+- `--date`
+- `--amount`
+- `--currency`
+- `--payee`
+- `--category-id`
+- `--memo`
+- `--cleared`
+- `--approved`
+
+Split line edits are handled by replacing the transaction from a JSON file. This creates the replacement first and deletes the original only after the replacement succeeds:
+
+```sh
+ynab-expense edit \
+  --id original-transaction-id \
+  --file corrected-split.json \
+  --replace-split \
+  --dry-run
+
+ynab-expense edit \
+  --id original-transaction-id \
+  --file corrected-split.json \
+  --replace-split \
+  --commit
+```
+
+If replacement creation succeeds but deleting the original fails, the CLI reports both transaction IDs so you can clean up manually.
+
 ## Amount Parsing
 
 YNAB stores amounts in milliunits. This MVP supports expense amounts in CLP and USD. CLP is the default currency.
@@ -268,9 +324,6 @@ Verify dry-run examples:
 ./ynab-expense add --budget default --account-id account-1 --amount 12.99 --currency USD --payee "Store" --date 2026-06-05 --dry-run
 ```
 
-### TODOs
-
-- [ ] Add a transaction update/edit command for existing expenses, including changing category and memo after creation.
 - [ ] Evaluate whether the project architecture should evolve to support more features as the CLI grows.
 
 ### Technical Debt

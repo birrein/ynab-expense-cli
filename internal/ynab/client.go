@@ -64,6 +64,10 @@ func (c *Client) GetTransactions(ctx context.Context, budget string, since strin
 	return c.get(ctx, path)
 }
 
+func (c *Client) GetTransaction(ctx context.Context, budget string, transactionID string) ([]byte, error) {
+	return c.get(ctx, "/plans/"+url.PathEscape(budget)+"/transactions/"+url.PathEscape(transactionID))
+}
+
 func (c *Client) CreateTransaction(ctx context.Context, budget string, payload transactions.PostTransactionRequest) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -71,6 +75,18 @@ func (c *Client) CreateTransaction(ctx context.Context, budget string, payload t
 	}
 
 	return c.do(ctx, http.MethodPost, "/plans/"+url.PathEscape(budget)+"/transactions", body)
+}
+
+func (c *Client) PatchTransactions(ctx context.Context, budget string, payload transactions.PatchTransactionsRequest) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return c.do(ctx, http.MethodPatch, "/plans/"+url.PathEscape(budget)+"/transactions", body)
+}
+
+func (c *Client) DeleteTransaction(ctx context.Context, budget string, transactionID string) ([]byte, error) {
+	return c.do(ctx, http.MethodDelete, "/plans/"+url.PathEscape(budget)+"/transactions/"+url.PathEscape(transactionID), nil)
 }
 
 func (c *Client) get(ctx context.Context, path string) ([]byte, error) {

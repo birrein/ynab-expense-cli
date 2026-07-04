@@ -894,6 +894,425 @@ func TestAddFileCommitSendsSplitTransaction(t *testing.T) {
 	}
 }
 
+func TestEditRejectsMissingID(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--memo", "Uber One")
+
+	if err == nil {
+		t.Fatal("edit accepted missing id")
+	}
+	if !strings.Contains(err.Error(), "--id is required") {
+		t.Fatalf("expected id required error, got %q", err.Error())
+	}
+}
+
+func TestEditRejectsNoEditFields(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123")
+
+	if err == nil {
+		t.Fatal("edit accepted no edit fields")
+	}
+	if !strings.Contains(err.Error(), "at least one edit field is required") {
+		t.Fatalf("expected edit field error, got %q", err.Error())
+	}
+}
+
+func TestEditRejectsDryRunAndCommitTogether(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--memo", "Uber One", "--dry-run", "--commit")
+
+	if err == nil {
+		t.Fatal("edit accepted --dry-run with --commit")
+	}
+	if !strings.Contains(err.Error(), "--dry-run cannot be used with --commit") {
+		t.Fatalf("expected dry-run conflict error, got %q", err.Error())
+	}
+}
+
+func TestEditRejectsCurrencyWithoutAmount(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--currency", "USD", "--memo", "Uber One")
+
+	if err == nil {
+		t.Fatal("edit accepted currency without amount")
+	}
+	if !strings.Contains(err.Error(), "--currency requires --amount") {
+		t.Fatalf("expected currency error, got %q", err.Error())
+	}
+}
+
+func TestEditRejectsInvalidDate(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--date", "2026-02-31")
+
+	if err == nil {
+		t.Fatal("edit accepted invalid date")
+	}
+	if !strings.Contains(err.Error(), "--date must be YYYY-MM-DD") {
+		t.Fatalf("expected date error, got %q", err.Error())
+	}
+}
+
+func TestEditRejectsInvalidClearedStatus(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--cleared", "maybe")
+
+	if err == nil {
+		t.Fatal("edit accepted invalid cleared status")
+	}
+	if !strings.Contains(err.Error(), "--cleared must be one of: cleared, uncleared, reconciled") {
+		t.Fatalf("expected cleared error, got %q", err.Error())
+	}
+}
+
+func TestEditDryRunRequiresToken(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: fakeTokenResolver{err: auth.ErrTokenNotFound},
+	})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--memo", "Uber One")
+
+	if err == nil {
+		t.Fatal("edit dry-run returned nil error without token")
+	}
+	if !strings.Contains(err.Error(), "No YNAB token found") {
+		t.Fatalf("expected missing-token error, got %q", err.Error())
+	}
+}
+
+func TestEditDryRunPrintsBeforeAndPatch(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getTransactionResponse: []byte(`{"data":{"transaction":{"id":"tx-123","account_id":"account-1","date":"2026-06-27","amount":-3990000,"payee_name":"Uber","category_id":"transportation","memo":"old memo","subtransactions":[]}}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{DefaultBudgetID: "budget-config"})
+
+	err := executeCommand(cmd, "edit", "--id", " tx-123 ", "--memo", " Uber One ", "--category-id", " monthly-subscriptions ")
+
+	if err != nil {
+		t.Fatalf("edit dry-run returned error: %v", err)
+	}
+	if client.getTransactionBudget != "budget-config" {
+		t.Fatalf("budget = %q, want budget-config", client.getTransactionBudget)
+	}
+	if client.getTransactionID != "tx-123" {
+		t.Fatalf("transaction id = %q, want tx-123", client.getTransactionID)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"dry_run": true`,
+		`"operation": "edit"`,
+		`"before"`,
+		`"patch"`,
+		`"category_id": "monthly-subscriptions"`,
+		`"memo": "Uber One"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("edit output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestEditRejectsBadTransactionResponse(t *testing.T) {
+	cases := map[string]string{
+		"null transaction": `{"data":{"transaction":null}}`,
+		"missing id":       `{"data":{"transaction":{}}}`,
+		"blank id":         `{"data":{"transaction":{"id":"   "}}}`,
+		"missing property": `{"data":{}}`,
+	}
+
+	for name, response := range cases {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			client := &fakeYNABClient{
+				getTransactionResponse: []byte(response),
+			}
+			cmd := commandWithFakeClient(&out, client)
+
+			err := executeCommand(cmd, "edit", "--id", "tx-123", "--memo", "Uber One")
+
+			if err == nil {
+				t.Fatal("edit accepted bad transaction response")
+			}
+			if !strings.Contains(err.Error(), "transaction response missing transaction") {
+				t.Fatalf("expected transaction response error, got %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestEditCommitRejectsMismatchedFetchedTransactionID(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getTransactionResponse: []byte(`{"data":{"transaction":{"id":"other-tx","account_id":"account-1","date":"2026-06-27","amount":-3990000,"payee_name":"Uber","subtransactions":[]}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--memo", "Uber One", "--commit")
+
+	if err == nil {
+		t.Fatal("edit accepted mismatched fetched transaction id")
+	}
+	if !strings.Contains(err.Error(), `fetched transaction id "other-tx" does not match requested id "tx-123"`) {
+		t.Fatalf("expected mismatched transaction id error, got %q", err.Error())
+	}
+	if client.patchTransactionsBudget != "" {
+		t.Fatalf("patch budget = %q, want empty", client.patchTransactionsBudget)
+	}
+	if len(client.patchTransactionsPayload.Transactions) != 0 {
+		t.Fatalf("patch payload = %#v, want empty", client.patchTransactionsPayload)
+	}
+}
+
+func TestEditCommitPatchesTransaction(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getTransactionResponse:    []byte(`{"data":{"transaction":{"id":"tx-123","account_id":"account-1","date":"2026-06-27","amount":-3990000,"payee_name":"Uber","subtransactions":[]}}}`),
+		patchTransactionsResponse: []byte(`{"data":{"transaction_ids":["tx-123"]}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd,
+		"edit",
+		"--budget", " default ",
+		"--id", "tx-123",
+		"--amount", "3990",
+		"--currency", "CLP",
+		"--date", "2026-06-27",
+		"--payee", "Uber",
+		"--approved=false",
+		"--commit",
+	)
+
+	if err != nil {
+		t.Fatalf("edit commit returned error: %v", err)
+	}
+	if client.patchTransactionsBudget != "default" {
+		t.Fatalf("patch budget = %q, want default", client.patchTransactionsBudget)
+	}
+	if len(client.patchTransactionsPayload.Transactions) != 1 {
+		t.Fatalf("patch payload = %#v", client.patchTransactionsPayload)
+	}
+	patch := client.patchTransactionsPayload.Transactions[0]
+	if patch.ID != "tx-123" || patch.Date != "2026-06-27" || patch.PayeeName != "Uber" {
+		t.Fatalf("patch = %#v", patch)
+	}
+	if patch.Amount == nil || *patch.Amount != -3990000 {
+		t.Fatalf("amount = %#v, want -3990000", patch.Amount)
+	}
+	if patch.Approved == nil || *patch.Approved {
+		t.Fatalf("approved = %#v, want false", patch.Approved)
+	}
+	if !strings.Contains(out.String(), `"transaction_ids"`) {
+		t.Fatalf("edit commit output missing response JSON, got %q", out.String())
+	}
+}
+
+func TestEditFileRequiresReplaceSplit(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{"date":"2026-06-28","amount":1000,"payee":"Store","category_id":"category"}`)
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--file", path)
+
+	if err == nil {
+		t.Fatal("edit accepted --file without --replace-split")
+	}
+	if !strings.Contains(err.Error(), "--file requires --replace-split") {
+		t.Fatalf("expected file requires replace-split error, got %q", err.Error())
+	}
+}
+
+func TestEditReplaceSplitRequiresFile(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--replace-split")
+
+	if err == nil {
+		t.Fatal("edit accepted --replace-split without --file")
+	}
+	if !strings.Contains(err.Error(), "--replace-split requires --file") {
+		t.Fatalf("expected replace-split requires file error, got %q", err.Error())
+	}
+}
+
+func TestEditReplaceSplitRejectsDetailFlags(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-28",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--file", path, "--replace-split", "--memo", "new memo")
+
+	if err == nil {
+		t.Fatal("edit accepted detail flags with replace-split file")
+	}
+	if !strings.Contains(err.Error(), "--file cannot be combined with transaction detail flags") {
+		t.Fatalf("expected mixed input error, got %q", err.Error())
+	}
+}
+
+func TestEditReplaceSplitDryRunInheritsOriginalAccount(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-28",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"memo": "Corrected split",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	client := &fakeYNABClient{
+		getTransactionResponse: []byte(`{"data":{"transaction":{"id":"tx-123","account_id":"original-account","date":"2026-06-28","amount":-10990000,"payee_name":"Main Merchant","subtransactions":[{"id":"sub-1"}]}}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID:  "budget-config",
+		DefaultAccountID: "default-account",
+	})
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--file", path, "--replace-split")
+
+	if err != nil {
+		t.Fatalf("replace-split dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"operation": "replace_split"`,
+		`"warning": "commit will create a replacement transaction and delete the original transaction"`,
+		`"original_transaction_id": "tx-123"`,
+		`"account_id": "original-account"`,
+		`"subtransactions"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("replace-split output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestEditReplaceSplitCommitCreatesBeforeDeleting(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-28",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	client := &fakeYNABClient{
+		getTransactionResponse:    []byte(`{"data":{"transaction":{"id":"old-tx","account_id":"original-account","subtransactions":[{"id":"sub-1"}]}}}`),
+		createTransactionResponse: []byte(`{"data":{"transaction":{"id":"new-tx"}}}`),
+		deleteTransactionResponse: []byte(`{"data":{"transaction":{"id":"old-tx","deleted":true}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "edit", "--budget", "default", "--id", "old-tx", "--file", path, "--replace-split", "--commit")
+
+	if err != nil {
+		t.Fatalf("replace-split commit returned error: %v", err)
+	}
+	if client.createTransactionBudget != "default" {
+		t.Fatalf("create budget = %q, want default", client.createTransactionBudget)
+	}
+	if client.deleteTransactionID != "old-tx" {
+		t.Fatalf("delete id = %q, want old-tx", client.deleteTransactionID)
+	}
+	if client.createTransactionPayload.Transaction.AccountID != "original-account" {
+		t.Fatalf("replacement account = %q", client.createTransactionPayload.Transaction.AccountID)
+	}
+	if got, want := strings.Join(client.writeCallOrder, ","), "create,delete"; got != want {
+		t.Fatalf("write order = %q, want %q", got, want)
+	}
+	output := out.String()
+	for _, want := range []string{`"operation": "replace_split"`, `"created_transaction_id": "new-tx"`, `"deleted_transaction_id": "old-tx"`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestEditReplaceSplitCreateFailureDoesNotDeleteOriginal(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-28",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	client := &fakeYNABClient{
+		getTransactionResponse: []byte(`{"data":{"transaction":{"id":"old-tx","account_id":"original-account","subtransactions":[{"id":"sub-1"}]}}}`),
+		createTransactionErr:   errors.New("create failed"),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "edit", "--id", "old-tx", "--file", path, "--replace-split", "--commit")
+
+	if err == nil {
+		t.Fatal("replace-split commit returned nil error after create failure")
+	}
+	if client.deleteTransactionID != "" {
+		t.Fatalf("delete was called for %q after create failure", client.deleteTransactionID)
+	}
+}
+
+func TestEditReplaceSplitDeleteFailureReportsBothIDs(t *testing.T) {
+	var out bytes.Buffer
+	path := writeCLIExpenseFile(t, `{
+		"date": "2026-06-28",
+		"amount": 10990,
+		"payee": "Main Merchant",
+		"splits": [
+			{"amount": 10000, "category_id": "primary-category"},
+			{"amount": 990, "category_id": "fee-category"}
+		]
+	}`)
+	client := &fakeYNABClient{
+		getTransactionResponse:    []byte(`{"data":{"transaction":{"id":"old-tx","account_id":"original-account","subtransactions":[{"id":"sub-1"}]}}}`),
+		createTransactionResponse: []byte(`{"data":{"transaction":{"id":"new-tx"}}}`),
+		deleteTransactionErr:      errors.New("delete failed"),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "edit", "--id", "old-tx", "--file", path, "--replace-split", "--commit")
+
+	if err == nil {
+		t.Fatal("replace-split commit returned nil error after delete failure")
+	}
+	for _, want := range []string{"new-tx", "old-tx", "delete failed"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q missing %q", err.Error(), want)
+		}
+	}
+}
+
 func writeCLIExpenseFile(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "expense.json")
@@ -1248,9 +1667,21 @@ type fakeYNABClient struct {
 	transactionsSince         string
 	transactionsUntil         string
 	transactionsResponse      []byte
+	getTransactionBudget      string
+	getTransactionID          string
+	getTransactionResponse    []byte
 	createTransactionBudget   string
 	createTransactionPayload  transactions.PostTransactionRequest
 	createTransactionResponse []byte
+	patchTransactionsBudget   string
+	patchTransactionsPayload  transactions.PatchTransactionsRequest
+	patchTransactionsResponse []byte
+	deleteTransactionBudget   string
+	deleteTransactionID       string
+	deleteTransactionResponse []byte
+	createTransactionErr      error
+	deleteTransactionErr      error
+	writeCallOrder            []string
 	err                       error
 }
 
@@ -1288,11 +1719,46 @@ func (c *fakeYNABClient) GetTransactions(_ context.Context, budget string, since
 	return c.transactionsResponse, nil
 }
 
-func (c *fakeYNABClient) CreateTransaction(_ context.Context, budget string, payload transactions.PostTransactionRequest) ([]byte, error) {
+func (c *fakeYNABClient) GetTransaction(_ context.Context, budget string, transactionID string) ([]byte, error) {
 	if c.err != nil {
 		return nil, c.err
 	}
+	c.getTransactionBudget = budget
+	c.getTransactionID = transactionID
+	return c.getTransactionResponse, nil
+}
+
+func (c *fakeYNABClient) CreateTransaction(_ context.Context, budget string, payload transactions.PostTransactionRequest) ([]byte, error) {
+	if c.createTransactionErr != nil {
+		return nil, c.createTransactionErr
+	}
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.writeCallOrder = append(c.writeCallOrder, "create")
 	c.createTransactionBudget = budget
 	c.createTransactionPayload = payload
 	return c.createTransactionResponse, nil
+}
+
+func (c *fakeYNABClient) PatchTransactions(_ context.Context, budget string, payload transactions.PatchTransactionsRequest) ([]byte, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.patchTransactionsBudget = budget
+	c.patchTransactionsPayload = payload
+	return c.patchTransactionsResponse, nil
+}
+
+func (c *fakeYNABClient) DeleteTransaction(_ context.Context, budget string, transactionID string) ([]byte, error) {
+	if c.deleteTransactionErr != nil {
+		return nil, c.deleteTransactionErr
+	}
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.writeCallOrder = append(c.writeCallOrder, "delete")
+	c.deleteTransactionBudget = budget
+	c.deleteTransactionID = transactionID
+	return c.deleteTransactionResponse, nil
 }

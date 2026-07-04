@@ -200,3 +200,82 @@ func TestClientReturnsReadableAPIError(t *testing.T) {
 		}
 	}
 }
+
+func TestClientGetTransactionUsesEscapedPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		if r.URL.EscapedPath() != "/plans/budget%2Fid/transactions/tx%2Fid" {
+			t.Fatalf("escaped path = %q", r.URL.EscapedPath())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer token-123" {
+			t.Fatalf("Authorization = %q, want Bearer token-123", got)
+		}
+		_, _ = w.Write([]byte(`{"data":{"transaction":{"id":"tx/id"}}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-123", server.Client())
+	body, err := client.GetTransaction(context.Background(), "budget/id", "tx/id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"tx/id"`) {
+		t.Fatalf("body = %s", body)
+	}
+}
+
+func TestClientPatchTransactionsSendsPatchPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %q, want PATCH", r.Method)
+		}
+		if r.URL.Path != "/plans/default/transactions" {
+			t.Fatalf("path = %q, want /plans/default/transactions", r.URL.Path)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		var payload transactions.PatchTransactionsRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if len(payload.Transactions) != 1 || payload.Transactions[0].ID != "tx-123" {
+			t.Fatalf("payload = %#v", payload)
+		}
+		_, _ = w.Write([]byte(`{"data":{"transaction_ids":["tx-123"]}}`))
+	}))
+	defer server.Close()
+
+	memo := "Uber One"
+	payload := transactions.PatchTransactionsRequest{
+		Transactions: []transactions.PatchTransaction{
+			transactions.BuildPatch(transactions.PatchInput{ID: "tx-123", Memo: &memo}),
+		},
+	}
+	client := NewClient(server.URL, "token-123", server.Client())
+	_, err := client.PatchTransactions(context.Background(), "default", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientDeleteTransactionUsesDelete(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Fatalf("method = %q, want DELETE", r.Method)
+		}
+		if r.URL.EscapedPath() != "/plans/default/transactions/tx%2F123" {
+			t.Fatalf("escaped path = %q", r.URL.EscapedPath())
+		}
+		_, _ = w.Write([]byte(`{"data":{"transaction":{"id":"tx/123","deleted":true}}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-123", server.Client())
+	_, err := client.DeleteTransaction(context.Background(), "default", "tx/123")
+	if err != nil {
+		t.Fatal(err)
+	}
+}

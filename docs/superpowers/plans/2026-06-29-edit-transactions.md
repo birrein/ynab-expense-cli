@@ -36,7 +36,7 @@
 - Modify: `internal/transactions/transaction.go`
 - Modify: `internal/transactions/transaction_test.go`
 
-- [ ] **Step 1: Add failing tests for patch payload construction**
+- [x] **Step 1: Add failing tests for patch payload construction**
 
 Append these tests to `internal/transactions/transaction_test.go`:
 
@@ -118,7 +118,7 @@ import (
 )
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run:
 
@@ -128,7 +128,7 @@ go test ./internal/transactions -run 'TestBuildPatch' -count=1
 
 Expected: FAIL with `undefined: BuildPatch`, `undefined: PatchInput`, or related missing type errors.
 
-- [ ] **Step 3: Implement patch payload types and builder**
+- [x] **Step 3: Implement patch payload types and builder**
 
 Add this code near the existing transaction types in `internal/transactions/transaction.go`:
 
@@ -186,7 +186,7 @@ func BuildPatch(input PatchInput) PatchTransaction {
 }
 ```
 
-- [ ] **Step 4: Run transaction tests**
+- [x] **Step 4: Run transaction tests**
 
 Run:
 
@@ -196,7 +196,7 @@ go test ./internal/transactions -count=1
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit transaction payloads**
+- [x] **Step 5: Commit transaction payloads**
 
 Run:
 
@@ -211,7 +211,7 @@ git commit -m "feat(transactions): add edit patch payloads"
 - Modify: `internal/ynab/client.go`
 - Modify: `internal/ynab/client_test.go`
 
-- [ ] **Step 1: Add failing client tests**
+- [x] **Step 1: Add failing client tests**
 
 Append these tests to `internal/ynab/client_test.go`:
 
@@ -296,7 +296,7 @@ func TestClientDeleteTransactionUsesDelete(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run:
 
@@ -306,7 +306,7 @@ go test ./internal/ynab -run 'TestClient(GetTransaction|PatchTransactions|Delete
 
 Expected: FAIL with missing method errors on `*Client`.
 
-- [ ] **Step 3: Implement client methods**
+- [x] **Step 3: Implement client methods**
 
 Add these methods to `internal/ynab/client.go`:
 
@@ -328,7 +328,7 @@ func (c *Client) DeleteTransaction(ctx context.Context, budget string, transacti
 }
 ```
 
-- [ ] **Step 4: Run client tests**
+- [x] **Step 4: Run client tests**
 
 Run:
 
@@ -338,7 +338,7 @@ go test ./internal/ynab -count=1
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit YNAB client methods**
+- [x] **Step 5: Commit YNAB client methods**
 
 Run:
 
@@ -354,7 +354,7 @@ git commit -m "feat(ynab): add transaction edit endpoints"
 - Create: `internal/cli/edit.go`
 - Modify: `internal/cli/cli_test.go`
 
-- [ ] **Step 1: Add failing tests for command registration and basic validation**
+- [x] **Step 1: Add failing tests for command registration and basic validation**
 
 Add these tests after the existing add command tests in `internal/cli/cli_test.go`:
 
@@ -402,7 +402,7 @@ func TestEditRejectsDryRunAndCommitTogether(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run:
 
@@ -412,7 +412,7 @@ go test ./internal/cli -run 'TestEditRejects' -count=1
 
 Expected: FAIL because `edit` is not a registered command.
 
-- [ ] **Step 3: Extend `ynabClient` and fake client**
+- [x] **Step 3: Extend `ynabClient` and fake client**
 
 Modify the `ynabClient` interface in `internal/cli/root.go` so it includes:
 
@@ -488,7 +488,7 @@ func (c *fakeYNABClient) CreateTransaction(_ context.Context, budget string, pay
 }
 ```
 
-- [ ] **Step 4: Create minimal `edit` command validation**
+- [x] **Step 4: Create minimal `edit` command validation**
 
 Create `internal/cli/edit.go` with this starter implementation:
 
@@ -580,7 +580,7 @@ Register the command in `internal/cli/root.go`:
 cmd.AddCommand(app.newEditCommand())
 ```
 
-- [ ] **Step 5: Run validation tests**
+- [x] **Step 5: Run validation tests**
 
 Run:
 
@@ -590,7 +590,7 @@ go test ./internal/cli -run 'TestEditRejects' -count=1
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit command shell**
+- [x] **Step 6: Commit command shell**
 
 Run:
 
@@ -605,7 +605,7 @@ git commit -m "feat(cli): add edit command shell"
 - Modify: `internal/cli/edit.go`
 - Modify: `internal/cli/cli_test.go`
 
-- [ ] **Step 1: Add failing tests for simple edit behavior**
+- [x] **Step 1: Add failing tests for simple edit behavior**
 
 Add these tests to `internal/cli/cli_test.go`:
 
@@ -746,7 +746,7 @@ func TestEditCommitPatchesTransaction(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run:
 
@@ -756,7 +756,7 @@ go test ./internal/cli -run 'TestEdit(RejectsCurrency|RejectsInvalid|DryRun|Comm
 
 Expected: FAIL because `runEdit` still returns `edit command is not implemented`.
 
-- [ ] **Step 3: Implement simple edit validation and patch construction**
+- [x] **Step 3: Implement simple edit validation and patch construction**
 
 Replace the body of `internal/cli/edit.go` with a full simple-edit path. Keep the existing options and command setup, then add imports:
 
@@ -969,7 +969,7 @@ func (a *App) runReplaceSplitEdit(cmd *cobra.Command, opts editOptions) error {
 }
 ```
 
-- [ ] **Step 4: Run simple edit tests**
+- [x] **Step 4: Run simple edit tests**
 
 Run:
 
@@ -979,7 +979,7 @@ go test ./internal/cli -run 'TestEdit(Rejects|DryRun|Commit)' -count=1
 
 Expected: PASS for simple edit tests. Existing replace-split tests do not exist yet.
 
-- [ ] **Step 5: Run full CLI tests**
+- [x] **Step 5: Run full CLI tests**
 
 Run:
 
@@ -989,7 +989,7 @@ go test ./internal/cli -count=1
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit simple edit behavior**
+- [x] **Step 6: Commit simple edit behavior**
 
 Run:
 
@@ -1004,7 +1004,7 @@ git commit -m "feat(cli): support simple transaction edits"
 - Modify: `internal/cli/edit.go`
 - Modify: `internal/cli/cli_test.go`
 
-- [ ] **Step 1: Add failing tests for replace-split validation and dry-run**
+- [x] **Step 1: Add failing tests for replace-split validation and dry-run**
 
 Add these tests to `internal/cli/cli_test.go`:
 
@@ -1101,7 +1101,7 @@ func TestEditReplaceSplitDryRunInheritsOriginalAccount(t *testing.T) {
 }
 ```
 
-- [ ] **Step 2: Run tests and verify they fail**
+- [x] **Step 2: Run tests and verify they fail**
 
 Run:
 
@@ -1111,7 +1111,7 @@ go test ./internal/cli -run 'TestEdit(File|ReplaceSplit)' -count=1
 
 Expected: FAIL because `runReplaceSplitEdit` is still a stub.
 
-- [ ] **Step 3: Implement replace-split dry-run**
+- [x] **Step 3: Implement replace-split dry-run**
 
 Add output types to `internal/cli/edit.go`:
 
@@ -1242,7 +1242,7 @@ func (a *App) commitReplaceSplit(cmd *cobra.Command, client ynabClient, budget s
 }
 ```
 
-- [ ] **Step 4: Run replace-split dry-run tests**
+- [x] **Step 4: Run replace-split dry-run tests**
 
 Run:
 
@@ -1252,7 +1252,7 @@ go test ./internal/cli -run 'TestEdit(File|ReplaceSplit.*DryRun|ReplaceSplitRequ
 
 Expected: PASS for validation and dry-run tests.
 
-- [ ] **Step 5: Add failing commit tests**
+- [x] **Step 5: Add failing commit tests**
 
 Add these tests to `internal/cli/cli_test.go`:
 
@@ -1357,7 +1357,7 @@ func TestEditReplaceSplitDeleteFailureReportsBothIDs(t *testing.T) {
 
 Ensure `internal/cli/cli_test.go` imports `errors`.
 
-- [ ] **Step 6: Run commit tests and verify they fail**
+- [x] **Step 6: Run commit tests and verify they fail**
 
 Run:
 
@@ -1367,7 +1367,7 @@ go test ./internal/cli -run 'TestEditReplaceSplit.*Commit|TestEditReplaceSplit.*
 
 Expected: FAIL because `commitReplaceSplit` is still a stub.
 
-- [ ] **Step 7: Implement replace-split commit output**
+- [x] **Step 7: Implement replace-split commit output**
 
 Add these types and helpers to `internal/cli/edit.go`:
 
@@ -1435,7 +1435,7 @@ func (a *App) commitReplaceSplit(cmd *cobra.Command, client ynabClient, budget s
 }
 ```
 
-- [ ] **Step 8: Run replace-split tests**
+- [x] **Step 8: Run replace-split tests**
 
 Run:
 
@@ -1445,7 +1445,7 @@ go test ./internal/cli -run 'TestEdit(File|ReplaceSplit)' -count=1
 
 Expected: PASS.
 
-- [ ] **Step 9: Run full CLI tests**
+- [x] **Step 9: Run full CLI tests**
 
 Run:
 
@@ -1455,7 +1455,7 @@ go test ./internal/cli -count=1
 
 Expected: PASS.
 
-- [ ] **Step 10: Commit split replacement**
+- [x] **Step 10: Commit split replacement**
 
 Run:
 
@@ -1470,7 +1470,7 @@ git commit -m "feat(cli): replace split transactions"
 - Modify: `README.md`
 - Read: `docs/superpowers/specs/2026-06-29-edit-transactions-design.md`
 
-- [ ] **Step 1: Add README documentation**
+- [x] **Step 1: Add README documentation**
 
 Add a new section after the existing `Add Expenses` section in `README.md`:
 
@@ -1532,7 +1532,7 @@ ynab-expense edit \
 If replacement creation succeeds but deleting the original fails, the CLI reports both transaction IDs so you can clean up manually.
 ````
 
-- [ ] **Step 2: Run full test suite**
+- [x] **Step 2: Run full test suite**
 
 Run:
 
@@ -1542,7 +1542,7 @@ go test ./... -count=1
 
 Expected: PASS.
 
-- [ ] **Step 3: Build binary**
+- [x] **Step 3: Build binary**
 
 Run:
 
@@ -1552,7 +1552,7 @@ go build -o ynab-expense ./cmd/ynab-expense
 
 Expected: exits 0 and creates `./ynab-expense`.
 
-- [ ] **Step 4: Run non-token validation smoke**
+- [x] **Step 4: Run non-token validation smoke**
 
 Run:
 
@@ -1566,7 +1566,7 @@ Expected: fails before token lookup with:
 at least one edit field is required
 ```
 
-- [ ] **Step 5: Run dry-run smoke with fake-safe validation**
+- [x] **Step 5: Run dry-run smoke with fake-safe validation**
 
 Run:
 
@@ -1580,7 +1580,7 @@ Expected: fails before token lookup with:
 --id is required
 ```
 
-- [ ] **Step 6: Remove local binary**
+- [x] **Step 6: Remove local binary**
 
 Run:
 
@@ -1590,7 +1590,7 @@ rm -f ./ynab-expense
 
 Expected: `git status --short` does not show the binary.
 
-- [ ] **Step 7: Review diff for personal data**
+- [x] **Step 7: Review diff for personal data**
 
 Run:
 
@@ -1600,7 +1600,7 @@ git diff -- README.md internal/transactions/transaction.go internal/transactions
 
 Expected: no real budget IDs, account IDs, category IDs, transaction IDs, merchant details from personal history, or private generated files.
 
-- [ ] **Step 8: Commit docs and final verification**
+- [x] **Step 8: Commit docs and final verification**
 
 Run:
 
@@ -1614,7 +1614,7 @@ git commit -m "docs(edit): document transaction edits"
 **Files:**
 - Read: full working tree
 
-- [ ] **Step 1: Confirm all expected commits exist**
+- [x] **Step 1: Confirm all expected commits exist**
 
 Run:
 
@@ -1633,7 +1633,7 @@ feat(ynab): add transaction edit endpoints
 feat(transactions): add edit patch payloads
 ```
 
-- [ ] **Step 2: Run final verification bundle**
+- [x] **Step 2: Run final verification bundle**
 
 Run:
 
@@ -1651,11 +1651,11 @@ Expected:
 - binary removed
 - `git status --short` is clean
 
-- [ ] **Step 3: Mark the implementation plan complete**
+- [x] **Step 3: Mark the implementation plan complete**
 
 Edit this plan file and change all completed checkboxes from `- [ ]` to `- [x]` as each step is completed during execution. Do not mark unchecked work complete.
 
-- [ ] **Step 4: Commit plan progress if it changed**
+- [x] **Step 4: Commit plan progress if it changed**
 
 If the plan file checkboxes were updated, run:
 
