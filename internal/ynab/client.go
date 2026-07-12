@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/birrein/ynab-expense-cli/internal/scheduled"
 	"github.com/birrein/ynab-expense-cli/internal/transactions"
 )
 
@@ -68,6 +69,14 @@ func (c *Client) GetTransaction(ctx context.Context, budget string, transactionI
 	return c.get(ctx, "/plans/"+url.PathEscape(budget)+"/transactions/"+url.PathEscape(transactionID))
 }
 
+func (c *Client) GetScheduledTransactions(ctx context.Context, budget string) ([]byte, error) {
+	return c.get(ctx, "/plans/"+url.PathEscape(budget)+"/scheduled_transactions")
+}
+
+func (c *Client) GetScheduledTransaction(ctx context.Context, budget string, scheduledTransactionID string) ([]byte, error) {
+	return c.get(ctx, "/plans/"+url.PathEscape(budget)+"/scheduled_transactions/"+url.PathEscape(scheduledTransactionID))
+}
+
 func (c *Client) CreateTransaction(ctx context.Context, budget string, payload transactions.PostTransactionRequest) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -77,12 +86,28 @@ func (c *Client) CreateTransaction(ctx context.Context, budget string, payload t
 	return c.do(ctx, http.MethodPost, "/plans/"+url.PathEscape(budget)+"/transactions", body)
 }
 
+func (c *Client) CreateScheduledTransaction(ctx context.Context, budget string, payload scheduled.PostScheduledTransactionRequest) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return c.do(ctx, http.MethodPost, "/plans/"+url.PathEscape(budget)+"/scheduled_transactions", body)
+}
+
 func (c *Client) PatchTransactions(ctx context.Context, budget string, payload transactions.PatchTransactionsRequest) ([]byte, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
 	}
 	return c.do(ctx, http.MethodPatch, "/plans/"+url.PathEscape(budget)+"/transactions", body)
+}
+
+func (c *Client) UpdateScheduledTransaction(ctx context.Context, budget string, scheduledTransactionID string, payload scheduled.PutScheduledTransactionRequest) ([]byte, error) {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return c.do(ctx, http.MethodPut, "/plans/"+url.PathEscape(budget)+"/scheduled_transactions/"+url.PathEscape(scheduledTransactionID), body)
 }
 
 func (c *Client) DeleteTransaction(ctx context.Context, budget string, transactionID string) ([]byte, error) {

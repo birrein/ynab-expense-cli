@@ -8,6 +8,7 @@ import (
 
 	"github.com/birrein/ynab-expense-cli/internal/auth"
 	localconfig "github.com/birrein/ynab-expense-cli/internal/config"
+	"github.com/birrein/ynab-expense-cli/internal/scheduled"
 	"github.com/birrein/ynab-expense-cli/internal/transactions"
 	"github.com/birrein/ynab-expense-cli/internal/ynab"
 	"github.com/spf13/cobra"
@@ -38,8 +39,12 @@ type ynabClient interface {
 	GetCategories(context.Context, string) ([]byte, error)
 	GetTransactions(context.Context, string, string, string) ([]byte, error)
 	GetTransaction(context.Context, string, string) ([]byte, error)
+	GetScheduledTransactions(context.Context, string) ([]byte, error)
+	GetScheduledTransaction(context.Context, string, string) ([]byte, error)
 	CreateTransaction(context.Context, string, transactions.PostTransactionRequest) ([]byte, error)
+	CreateScheduledTransaction(context.Context, string, scheduled.PostScheduledTransactionRequest) ([]byte, error)
 	PatchTransactions(context.Context, string, transactions.PatchTransactionsRequest) ([]byte, error)
+	UpdateScheduledTransaction(context.Context, string, string, scheduled.PutScheduledTransactionRequest) ([]byte, error)
 	DeleteTransaction(context.Context, string, string) ([]byte, error)
 }
 
@@ -107,6 +112,7 @@ func newRootCommandWithDeps(out io.Writer, errOut io.Writer, deps cliDeps) *cobr
 	cmd.AddCommand(app.newAccountsCommand())
 	cmd.AddCommand(app.newCategoriesCommand())
 	cmd.AddCommand(app.newTransactionsCommand())
+	cmd.AddCommand(app.newScheduledCommand())
 	cmd.AddCommand(app.newAddCommand())
 	cmd.AddCommand(app.newEditCommand())
 	cmd.AddCommand(app.newConfigCommand())

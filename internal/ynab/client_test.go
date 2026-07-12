@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/birrein/ynab-expense-cli/internal/scheduled"
 	"github.com/birrein/ynab-expense-cli/internal/transactions"
 )
 
@@ -223,6 +224,126 @@ func TestClientGetTransactionUsesEscapedPath(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"tx/id"`) {
 		t.Fatalf("body = %s", body)
+	}
+}
+
+func TestClientGetScheduledTransactionsUsesPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		if r.URL.EscapedPath() != "/plans/budget%2Fid/scheduled_transactions" {
+			t.Fatalf("escaped path = %q", r.URL.EscapedPath())
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer token-123" {
+			t.Fatalf("Authorization = %q, want Bearer token-123", got)
+		}
+		_, _ = w.Write([]byte(`{"data":{"scheduled_transactions":[]}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-123", server.Client())
+	_, err := client.GetScheduledTransactions(context.Background(), "budget/id")
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientGetScheduledTransactionUsesEscapedPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %q, want GET", r.Method)
+		}
+		if r.URL.EscapedPath() != "/plans/budget%2Fid/scheduled_transactions/scheduled%2Fid" {
+			t.Fatalf("escaped path = %q", r.URL.EscapedPath())
+		}
+		_, _ = w.Write([]byte(`{"data":{"scheduled_transaction":{"id":"scheduled/id"}}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "token-123", server.Client())
+	body, err := client.GetScheduledTransaction(context.Background(), "budget/id", "scheduled/id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"scheduled/id"`) {
+		t.Fatalf("body = %s", body)
+	}
+}
+
+func TestClientCreateScheduledTransactionPostsPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %q, want POST", r.Method)
+		}
+		if r.URL.Path != "/plans/default/scheduled_transactions" {
+			t.Fatalf("path = %q, want /plans/default/scheduled_transactions", r.URL.Path)
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		var payload scheduled.PostScheduledTransactionRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.ScheduledTransaction.AccountID != "account-1" {
+			t.Fatalf("payload = %#v", payload)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"data":{"scheduled_transaction":{"id":"scheduled-1"}}}`))
+	}))
+	defer server.Close()
+
+	payload := scheduled.PostScheduledTransactionRequest{
+		ScheduledTransaction: scheduled.BuildExpense(scheduled.Input{
+			AccountID:        "account-1",
+			Date:             "2026-08-23",
+			AmountMilliunits: -23332000,
+			PayeeName:        "Mercado Libre",
+			Frequency:        "never",
+		}),
+	}
+	client := NewClient(server.URL, "token-123", server.Client())
+	_, err := client.CreateScheduledTransaction(context.Background(), "default", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientUpdateScheduledTransactionPutsPayload(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Fatalf("method = %q, want PUT", r.Method)
+		}
+		if r.URL.EscapedPath() != "/plans/default/scheduled_transactions/scheduled%2F1" {
+			t.Fatalf("escaped path = %q", r.URL.EscapedPath())
+		}
+		if got := r.Header.Get("Content-Type"); got != "application/json" {
+			t.Fatalf("Content-Type = %q, want application/json", got)
+		}
+		var payload scheduled.PutScheduledTransactionRequest
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.ScheduledTransaction.Memo != "Updated memo" {
+			t.Fatalf("payload = %#v", payload)
+		}
+		_, _ = w.Write([]byte(`{"data":{"scheduled_transaction":{"id":"scheduled/1"}}}`))
+	}))
+	defer server.Close()
+
+	payload := scheduled.PutScheduledTransactionRequest{
+		ScheduledTransaction: scheduled.SaveScheduledTransaction{
+			AccountID: "account-1",
+			Date:      "2026-08-23",
+			Amount:    -23332000,
+			Memo:      "Updated memo",
+		},
+	}
+	client := NewClient(server.URL, "token-123", server.Client())
+	_, err := client.UpdateScheduledTransaction(context.Background(), "default", "scheduled/1", payload)
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

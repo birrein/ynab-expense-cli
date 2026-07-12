@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/birrein/ynab-expense-cli/internal/auth"
 	localconfig "github.com/birrein/ynab-expense-cli/internal/config"
+	"github.com/birrein/ynab-expense-cli/internal/scheduled"
 	"github.com/birrein/ynab-expense-cli/internal/transactions"
 	"github.com/spf13/cobra"
 )
@@ -346,6 +348,542 @@ func TestTransactionsUsesConfiguredDefaultBudgetWhenFlagOmitted(t *testing.T) {
 	}
 	if client.transactionsBudget != "budget-config" {
 		t.Fatalf("expected configured budget budget-config, got %q", client.transactionsBudget)
+	}
+}
+
+func TestScheduledForwardsBudgetAndWritesResponse(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		scheduledTransactionsResponse: []byte(`{"data":{"scheduled_transactions":[{"memo":"Installment","date_next":"2026-08-23"}]}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "scheduled", "--budget", "default")
+
+	if err != nil {
+		t.Fatalf("scheduled returned error: %v", err)
+	}
+	if client.scheduledTransactionsBudget != "default" {
+		t.Fatalf("expected budget default, got %q", client.scheduledTransactionsBudget)
+	}
+	if !strings.Contains(out.String(), `"Installment"`) {
+		t.Fatalf("scheduled output did not include response JSON, got %q", out.String())
+	}
+}
+
+func TestScheduledUsesConfiguredDefaultBudgetWhenFlagOmitted(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		scheduledTransactionsResponse: []byte(`{"data":{"scheduled_transactions":[]}}`),
+	}
+	cmd := commandWithFakeClientAndConfig(&out, client, localconfig.Config{
+		DefaultBudgetID: " budget-config ",
+	})
+
+	err := executeCommand(cmd, "scheduled")
+
+	if err != nil {
+		t.Fatalf("scheduled returned error: %v", err)
+	}
+	if client.scheduledTransactionsBudget != "budget-config" {
+		t.Fatalf("expected configured budget budget-config, got %q", client.scheduledTransactionsBudget)
+	}
+}
+
+func TestScheduledFiltersByDateNext(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		scheduledTransactionsResponse: []byte(`{"data":{"scheduled_transactions":[{"id":"before","date_next":"2026-07-31"},{"id":"inside","date_next":"2026-08-15"},{"id":"after","date_next":"2026-09-01"}],"server_knowledge":42}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "scheduled", "--since", "2026-08-01", "--until", "2026-08-31")
+
+	if err != nil {
+		t.Fatalf("scheduled returned error: %v", err)
+	}
+	output := out.String()
+	if strings.Contains(output, `"before"`) || strings.Contains(output, `"after"`) {
+		t.Fatalf("scheduled output did not filter by date_next: %q", output)
+	}
+	for _, want := range []string{`"inside"`, `"server_knowledge":42`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("scheduled output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestScheduledRejectsInvalidFilterDateBeforeTokenResolution(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd, "scheduled", "--since", "not-a-date")
+
+	if err == nil {
+		t.Fatal("scheduled accepted invalid --since")
+	}
+	if !strings.Contains(err.Error(), "--since must be YYYY-MM-DD") {
+		t.Fatalf("expected date error, got %q", err.Error())
+	}
+}
+
+func TestScheduledRequiresToken(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: fakeTokenResolver{err: auth.ErrTokenNotFound},
+	})
+
+	err := executeCommand(cmd, "scheduled")
+
+	if err == nil {
+		t.Fatal("scheduled returned nil error without token")
+	}
+	if !strings.Contains(err.Error(), "No YNAB token found") {
+		t.Fatalf("expected missing-token error, got %q", err.Error())
+	}
+}
+
+func TestScheduledAddDryRunDoesNotRequireToken(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"scheduled", "add",
+		"--budget", "default",
+		"--account-id", "account-123",
+		"--amount", "23.332",
+		"--currency", "CLP",
+		"--payee", "Mercado Libre",
+		"--date", scheduledFutureDate(),
+		"--category-id", "category-123",
+		"--memo", "Mouse 2/6",
+	)
+
+	if err != nil {
+		t.Fatalf("scheduled add dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"dry_run": true`,
+		`"amount": -23332000`,
+		`"payee_name": "Mercado Libre"`,
+		`"frequency": "never"`,
+		`source=ynab-expense-cli`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("scheduled add dry-run output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestScheduledAddDryRunUsesConfiguredBudgetAndAccount(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		configStore: fakeConfigStoreValue(localconfig.Config{
+			DefaultBudgetID:  " budget-config ",
+			DefaultAccountID: " account-config ",
+		}),
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"scheduled", "add",
+		"--amount", "23332",
+		"--payee", "Mercado Libre",
+		"--date", scheduledFutureDate(),
+	)
+
+	if err != nil {
+		t.Fatalf("scheduled add dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{`"budget": "budget-config"`, `"account_id": "account-config"`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("scheduled add dry-run output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestScheduledAddExplicitBudgetAndAccountOverrideDefaults(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		configStore: fakeConfigStoreValue(localconfig.Config{
+			DefaultBudgetID:  "budget-config",
+			DefaultAccountID: "account-config",
+		}),
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"scheduled", "add",
+		"--budget", " budget-flag ",
+		"--account-id", " account-flag ",
+		"--amount", "23332",
+		"--payee", "Mercado Libre",
+		"--date", scheduledFutureDate(),
+	)
+
+	if err != nil {
+		t.Fatalf("scheduled add dry-run returned error: %v", err)
+	}
+	output := out.String()
+	for _, want := range []string{`"budget": "budget-flag"`, `"account_id": "account-flag"`} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("scheduled add dry-run output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestScheduledAddCommitSendsScheduledTransaction(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		createScheduledTransactionResponse: []byte(`{"data":{"scheduled_transaction":{"id":"scheduled-123"}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+	date := scheduledFutureDate()
+
+	err := executeCommand(cmd,
+		"scheduled", "add",
+		"--budget", " default ",
+		"--account-id", " account-123 ",
+		"--amount", "23.332",
+		"--payee", " Mercado Libre ",
+		"--date", date,
+		"--category-id", "category-123",
+		"--memo", "Mouse 2/6",
+		"--frequency", "monthly",
+		"--commit",
+	)
+
+	if err != nil {
+		t.Fatalf("scheduled add --commit returned error: %v", err)
+	}
+	if client.createScheduledTransactionBudget != "default" {
+		t.Fatalf("budget = %q", client.createScheduledTransactionBudget)
+	}
+	tx := client.createScheduledTransactionPayload.ScheduledTransaction
+	if tx.AccountID != "account-123" || tx.Date != date || tx.Amount != -23332000 {
+		t.Fatalf("scheduled payload = %#v", tx)
+	}
+	if tx.PayeeName == nil || *tx.PayeeName != "Mercado Libre" {
+		t.Fatalf("payee = %#v", tx.PayeeName)
+	}
+	if tx.CategoryID == nil || *tx.CategoryID != "category-123" {
+		t.Fatalf("category = %#v", tx.CategoryID)
+	}
+	if tx.Memo != "Mouse 2/6; source=ynab-expense-cli" {
+		t.Fatalf("memo = %q", tx.Memo)
+	}
+	if tx.Frequency != "monthly" {
+		t.Fatalf("frequency = %q", tx.Frequency)
+	}
+	if !strings.Contains(out.String(), `"scheduled-123"`) {
+		t.Fatalf("output missing response JSON, got %q", out.String())
+	}
+}
+
+func TestScheduledAddRejectsDryRunAndCommitTogether(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd,
+		"scheduled", "add",
+		"--account-id", "account-123",
+		"--amount", "23332",
+		"--payee", "Mercado Libre",
+		"--date", scheduledFutureDate(),
+		"--dry-run",
+		"--commit",
+	)
+
+	if err == nil {
+		t.Fatal("scheduled add accepted --dry-run with --commit")
+	}
+	if !strings.Contains(err.Error(), "--dry-run cannot be used with --commit") {
+		t.Fatalf("expected dry-run/commit error, got %q", err.Error())
+	}
+}
+
+func TestScheduledAddRejectsMissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "amount", args: []string{"scheduled", "add", "--account-id", "account-123", "--payee", "Store", "--date", scheduledFutureDate()}, want: "--amount is required"},
+		{name: "payee", args: []string{"scheduled", "add", "--account-id", "account-123", "--amount", "1000", "--date", scheduledFutureDate()}, want: "--payee is required"},
+		{name: "date", args: []string{"scheduled", "add", "--account-id", "account-123", "--amount", "1000", "--payee", "Store"}, want: "--date is required"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+				tokenResolver: failingTokenResolver{t: t},
+			})
+
+			err := executeCommand(cmd, tt.args...)
+
+			if err == nil {
+				t.Fatalf("scheduled add accepted missing %s", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected %q, got %q", tt.want, err.Error())
+			}
+		})
+	}
+}
+
+func TestScheduledAddRejectsInvalidDateFrequencyAndFile(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{name: "date", args: []string{"scheduled", "add", "--account-id", "account-123", "--amount", "1000", "--payee", "Store", "--date", "2026-02-31"}, want: "--date must be YYYY-MM-DD"},
+		{name: "frequency", args: []string{"scheduled", "add", "--account-id", "account-123", "--amount", "1000", "--payee", "Store", "--date", scheduledFutureDate(), "--frequency", "sometimes"}, want: "--frequency must be one of"},
+		{name: "file", args: []string{"scheduled", "add", "--file", "expense.json"}, want: "--file is not supported"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+				tokenResolver: failingTokenResolver{t: t},
+			})
+
+			err := executeCommand(cmd, tt.args...)
+
+			if err == nil {
+				t.Fatalf("scheduled add accepted invalid %s", tt.name)
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected %q, got %q", tt.want, err.Error())
+			}
+		})
+	}
+}
+
+func TestScheduledEditRejectsMissingID(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "scheduled", "edit", "--memo", "Updated")
+
+	if err == nil {
+		t.Fatal("scheduled edit accepted missing id")
+	}
+	if !strings.Contains(err.Error(), "--id is required") {
+		t.Fatalf("expected id error, got %q", err.Error())
+	}
+}
+
+func TestScheduledEditRejectsNoEditFields(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", "scheduled-123")
+
+	if err == nil {
+		t.Fatal("scheduled edit accepted no edit fields")
+	}
+	if !strings.Contains(err.Error(), "at least one edit field is required") {
+		t.Fatalf("expected edit field error, got %q", err.Error())
+	}
+}
+
+func TestScheduledEditRejectsDryRunAndCommitTogether(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", "scheduled-123", "--memo", "Updated", "--dry-run", "--commit")
+
+	if err == nil {
+		t.Fatal("scheduled edit accepted --dry-run with --commit")
+	}
+	if !strings.Contains(err.Error(), "--dry-run cannot be used with --commit") {
+		t.Fatalf("expected dry-run/commit conflict error, got %q", err.Error())
+	}
+}
+
+func TestScheduledEditRejectsCurrencyWithoutAmount(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", "scheduled-123", "--currency", "USD", "--memo", "Updated")
+
+	if err == nil {
+		t.Fatal("scheduled edit accepted currency without amount")
+	}
+	if !strings.Contains(err.Error(), "--currency requires --amount") {
+		t.Fatalf("expected currency error, got %q", err.Error())
+	}
+}
+
+func TestScheduledEditRejectsInvalidDate(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", "scheduled-123", "--date", "2026-02-31")
+
+	if err == nil {
+		t.Fatal("scheduled edit accepted invalid date")
+	}
+	if !strings.Contains(err.Error(), "--date must be YYYY-MM-DD") {
+		t.Fatalf("expected date error, got %q", err.Error())
+	}
+}
+
+func TestScheduledEditRejectsInvalidFrequency(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{})
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", "scheduled-123", "--frequency", "sometimes")
+
+	if err == nil {
+		t.Fatal("scheduled edit accepted invalid frequency")
+	}
+	if !strings.Contains(err.Error(), "--frequency must be one of") {
+		t.Fatalf("expected frequency error, got %q", err.Error())
+	}
+}
+
+func TestScheduledEditDryRunRequiresToken(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: fakeTokenResolver{err: auth.ErrTokenNotFound},
+	})
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", "scheduled-123", "--memo", "Updated")
+
+	if err == nil {
+		t.Fatal("scheduled edit returned nil without token")
+	}
+	if !strings.Contains(err.Error(), "No YNAB token found") {
+		t.Fatalf("expected missing token error, got %q", err.Error())
+	}
+}
+
+func TestScheduledEditDryRunPrintsBeforeAndPayload(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getScheduledTransactionResponse: []byte(`{"data":{"scheduled_transaction":{"id":"scheduled-123","date_next":"2026-08-23","frequency":"monthly","amount":-1000000,"account_id":"account-1","payee_id":"payee-1","category_id":"old-category","memo":"old memo","subtransactions":[]}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", " scheduled-123 ", "--memo", " Updated memo ", "--category-id", " new-category ")
+
+	if err != nil {
+		t.Fatalf("scheduled edit dry-run returned error: %v", err)
+	}
+	if client.getScheduledTransactionID != "scheduled-123" {
+		t.Fatalf("get scheduled id = %q", client.getScheduledTransactionID)
+	}
+	output := out.String()
+	for _, want := range []string{
+		`"dry_run": true`,
+		`"operation": "scheduled_edit"`,
+		`"before"`,
+		`"payload"`,
+		`"category_id": "new-category"`,
+		`"memo": "Updated memo; source=ynab-expense-cli"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("scheduled edit output missing %s, got %q", want, output)
+		}
+	}
+}
+
+func TestScheduledEditCommitUpdatesScheduledTransaction(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getScheduledTransactionResponse:    []byte(`{"data":{"scheduled_transaction":{"id":"scheduled-123","date_next":"2026-08-23","frequency":"monthly","amount":-1000000,"account_id":"account-1","payee_id":"payee-1","category_id":"old-category","memo":"old memo","subtransactions":[]}}}`),
+		updateScheduledTransactionResponse: []byte(`{"data":{"scheduled_transaction":{"id":"scheduled-123"}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+	date := scheduledFutureDate()
+
+	err := executeCommand(cmd,
+		"scheduled", "edit",
+		"--budget", "default",
+		"--id", "scheduled-123",
+		"--amount", "23.332",
+		"--currency", "CLP",
+		"--payee", "New Payee",
+		"--date", date,
+		"--frequency", "never",
+		"--commit",
+	)
+
+	if err != nil {
+		t.Fatalf("scheduled edit commit returned error: %v", err)
+	}
+	if client.updateScheduledTransactionBudget != "default" {
+		t.Fatalf("update budget = %q", client.updateScheduledTransactionBudget)
+	}
+	if client.updateScheduledTransactionID != "scheduled-123" {
+		t.Fatalf("update id = %q", client.updateScheduledTransactionID)
+	}
+	tx := client.updateScheduledTransactionPayload.ScheduledTransaction
+	if tx.Date != date || tx.Amount != -23332000 || tx.AccountID != "account-1" {
+		t.Fatalf("payload = %#v", tx)
+	}
+	if tx.PayeeID != nil {
+		t.Fatalf("payee id = %#v, want nil after payee change", tx.PayeeID)
+	}
+	if tx.PayeeName == nil || *tx.PayeeName != "New Payee" {
+		t.Fatalf("payee name = %#v", tx.PayeeName)
+	}
+	if tx.CategoryID == nil || *tx.CategoryID != "old-category" {
+		t.Fatalf("category = %#v", tx.CategoryID)
+	}
+	if tx.Frequency != "never" {
+		t.Fatalf("frequency = %q", tx.Frequency)
+	}
+	if !strings.Contains(out.String(), `"scheduled-123"`) {
+		t.Fatalf("commit output missing response JSON, got %q", out.String())
+	}
+}
+
+func TestScheduledEditRejectsMismatchedFetchedID(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getScheduledTransactionResponse: []byte(`{"data":{"scheduled_transaction":{"id":"other-scheduled","date_next":"2026-08-23","frequency":"monthly","amount":-1000000,"account_id":"account-1","subtransactions":[]}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", "scheduled-123", "--memo", "Updated", "--commit")
+
+	if err == nil {
+		t.Fatal("scheduled edit accepted mismatched fetched id")
+	}
+	if !strings.Contains(err.Error(), "does not match requested id") {
+		t.Fatalf("expected mismatch error, got %q", err.Error())
+	}
+	if client.updateScheduledTransactionID != "" {
+		t.Fatalf("update was called for %q", client.updateScheduledTransactionID)
+	}
+}
+
+func TestScheduledEditRejectsSplitScheduledTransaction(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getScheduledTransactionResponse: []byte(`{"data":{"scheduled_transaction":{"id":"scheduled-123","date_next":"2026-08-23","frequency":"monthly","amount":-1000000,"account_id":"account-1","subtransactions":[{"id":"sub-1"}]}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", "scheduled-123", "--memo", "Updated", "--commit")
+
+	if err == nil {
+		t.Fatal("scheduled edit accepted split scheduled transaction")
+	}
+	if !strings.Contains(err.Error(), "split") {
+		t.Fatalf("expected split error, got %q", err.Error())
+	}
+	if client.updateScheduledTransactionID != "" {
+		t.Fatalf("update was called for %q", client.updateScheduledTransactionID)
 	}
 }
 
@@ -1585,6 +2123,10 @@ func executeCommand(cmd *cobra.Command, args ...string) error {
 	return cmd.Execute()
 }
 
+func scheduledFutureDate() string {
+	return time.Now().AddDate(0, 1, 0).Format("2006-01-02")
+}
+
 type fakeTokenResolver struct {
 	token  string
 	source string
@@ -1657,32 +2199,44 @@ func (s *fakeConfigStore) Update(update localconfig.Config) (localconfig.Config,
 }
 
 type fakeYNABClient struct {
-	plansResponse             []byte
-	plansCalled               bool
-	accountsBudget            string
-	accountsResponse          []byte
-	categoriesBudget          string
-	categoriesResponse        []byte
-	transactionsBudget        string
-	transactionsSince         string
-	transactionsUntil         string
-	transactionsResponse      []byte
-	getTransactionBudget      string
-	getTransactionID          string
-	getTransactionResponse    []byte
-	createTransactionBudget   string
-	createTransactionPayload  transactions.PostTransactionRequest
-	createTransactionResponse []byte
-	patchTransactionsBudget   string
-	patchTransactionsPayload  transactions.PatchTransactionsRequest
-	patchTransactionsResponse []byte
-	deleteTransactionBudget   string
-	deleteTransactionID       string
-	deleteTransactionResponse []byte
-	createTransactionErr      error
-	deleteTransactionErr      error
-	writeCallOrder            []string
-	err                       error
+	plansResponse                      []byte
+	plansCalled                        bool
+	accountsBudget                     string
+	accountsResponse                   []byte
+	categoriesBudget                   string
+	categoriesResponse                 []byte
+	transactionsBudget                 string
+	transactionsSince                  string
+	transactionsUntil                  string
+	transactionsResponse               []byte
+	scheduledTransactionsBudget        string
+	scheduledTransactionsResponse      []byte
+	getTransactionBudget               string
+	getTransactionID                   string
+	getTransactionResponse             []byte
+	getScheduledTransactionBudget      string
+	getScheduledTransactionID          string
+	getScheduledTransactionResponse    []byte
+	createTransactionBudget            string
+	createTransactionPayload           transactions.PostTransactionRequest
+	createTransactionResponse          []byte
+	createScheduledTransactionBudget   string
+	createScheduledTransactionPayload  scheduled.PostScheduledTransactionRequest
+	createScheduledTransactionResponse []byte
+	patchTransactionsBudget            string
+	patchTransactionsPayload           transactions.PatchTransactionsRequest
+	patchTransactionsResponse          []byte
+	updateScheduledTransactionBudget   string
+	updateScheduledTransactionID       string
+	updateScheduledTransactionPayload  scheduled.PutScheduledTransactionRequest
+	updateScheduledTransactionResponse []byte
+	deleteTransactionBudget            string
+	deleteTransactionID                string
+	deleteTransactionResponse          []byte
+	createTransactionErr               error
+	deleteTransactionErr               error
+	writeCallOrder                     []string
+	err                                error
 }
 
 func (c *fakeYNABClient) GetPlans(context.Context) ([]byte, error) {
@@ -1719,6 +2273,14 @@ func (c *fakeYNABClient) GetTransactions(_ context.Context, budget string, since
 	return c.transactionsResponse, nil
 }
 
+func (c *fakeYNABClient) GetScheduledTransactions(_ context.Context, budget string) ([]byte, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.scheduledTransactionsBudget = budget
+	return c.scheduledTransactionsResponse, nil
+}
+
 func (c *fakeYNABClient) GetTransaction(_ context.Context, budget string, transactionID string) ([]byte, error) {
 	if c.err != nil {
 		return nil, c.err
@@ -1726,6 +2288,15 @@ func (c *fakeYNABClient) GetTransaction(_ context.Context, budget string, transa
 	c.getTransactionBudget = budget
 	c.getTransactionID = transactionID
 	return c.getTransactionResponse, nil
+}
+
+func (c *fakeYNABClient) GetScheduledTransaction(_ context.Context, budget string, scheduledTransactionID string) ([]byte, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.getScheduledTransactionBudget = budget
+	c.getScheduledTransactionID = scheduledTransactionID
+	return c.getScheduledTransactionResponse, nil
 }
 
 func (c *fakeYNABClient) CreateTransaction(_ context.Context, budget string, payload transactions.PostTransactionRequest) ([]byte, error) {
@@ -1741,6 +2312,15 @@ func (c *fakeYNABClient) CreateTransaction(_ context.Context, budget string, pay
 	return c.createTransactionResponse, nil
 }
 
+func (c *fakeYNABClient) CreateScheduledTransaction(_ context.Context, budget string, payload scheduled.PostScheduledTransactionRequest) ([]byte, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.createScheduledTransactionBudget = budget
+	c.createScheduledTransactionPayload = payload
+	return c.createScheduledTransactionResponse, nil
+}
+
 func (c *fakeYNABClient) PatchTransactions(_ context.Context, budget string, payload transactions.PatchTransactionsRequest) ([]byte, error) {
 	if c.err != nil {
 		return nil, c.err
@@ -1748,6 +2328,16 @@ func (c *fakeYNABClient) PatchTransactions(_ context.Context, budget string, pay
 	c.patchTransactionsBudget = budget
 	c.patchTransactionsPayload = payload
 	return c.patchTransactionsResponse, nil
+}
+
+func (c *fakeYNABClient) UpdateScheduledTransaction(_ context.Context, budget string, scheduledTransactionID string, payload scheduled.PutScheduledTransactionRequest) ([]byte, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	c.updateScheduledTransactionBudget = budget
+	c.updateScheduledTransactionID = scheduledTransactionID
+	c.updateScheduledTransactionPayload = payload
+	return c.updateScheduledTransactionResponse, nil
 }
 
 func (c *fakeYNABClient) DeleteTransaction(_ context.Context, budget string, transactionID string) ([]byte, error) {

@@ -105,6 +105,20 @@ List transactions since a date:
 ynab-expense transactions --since 2026-06-01
 ```
 
+List scheduled transactions:
+
+```sh
+ynab-expense scheduled
+```
+
+List scheduled transactions whose next scheduled date is in a range:
+
+```sh
+ynab-expense scheduled --since 2026-08-01 --until 2026-08-31
+```
+
+Scheduled transaction date filters are applied locally to `date_next` after fetching scheduled transactions from YNAB.
+
 ## Add Expenses
 
 `add` is dry-run by default. It prints the request payload and does not write to YNAB unless `--commit` is present.
@@ -264,6 +278,87 @@ ynab-expense edit \
 
 If replacement creation succeeds but deleting the original fails, the CLI reports both transaction IDs so you can clean up manually.
 
+## Scheduled Transactions
+
+Scheduled transactions use YNAB's scheduled transaction API. The regular `add` and `edit` commands keep using the regular transaction endpoints.
+
+`scheduled add` is dry-run by default and does not require a token until `--commit` is present:
+
+```sh
+ynab-expense scheduled add \
+  --account-id account-1 \
+  --amount 23332 \
+  --currency CLP \
+  --payee "Mercado Libre" \
+  --date 2026-08-23 \
+  --category-id category-id \
+  --memo "Mouse 2/6" \
+  --frequency never
+```
+
+Write the scheduled transaction only with `--commit`:
+
+```sh
+ynab-expense scheduled add \
+  --account-id account-1 \
+  --amount 23332 \
+  --currency CLP \
+  --payee "Mercado Libre" \
+  --date 2026-08-23 \
+  --category-id category-id \
+  --memo "Mouse 2/6" \
+  --frequency never \
+  --commit
+```
+
+`scheduled edit` reads the current scheduled transaction before previewing or writing. Dry-runs require a configured token because the CLI must fetch the existing scheduled transaction.
+
+```sh
+ynab-expense scheduled edit \
+  --id scheduled-transaction-id \
+  --memo "Updated memo" \
+  --dry-run
+
+ynab-expense scheduled edit \
+  --id scheduled-transaction-id \
+  --amount 23332 \
+  --currency CLP \
+  --date 2026-08-23 \
+  --frequency never \
+  --commit
+```
+
+Supported scheduled edit fields:
+
+- `--account-id`
+- `--date`
+- `--amount`
+- `--currency`
+- `--payee`
+- `--category-id`
+- `--memo`
+- `--frequency`
+
+Supported frequencies:
+
+```text
+never
+daily
+weekly
+everyOtherWeek
+twiceAMonth
+every4Weeks
+monthly
+everyOtherMonth
+every3Months
+every4Months
+twiceAYear
+yearly
+everyOtherYear
+```
+
+Scheduled transaction dates must be future dates and no more than five years in the future. Scheduled split transactions, scheduled `--file` input, and scheduled delete commands are not supported in this iteration.
+
 ## Amount Parsing
 
 YNAB stores amounts in milliunits. This MVP supports expense amounts in CLP and USD. CLP is the default currency.
@@ -292,9 +387,12 @@ For USD, `12990` is interpreted as 12,990 dollars, not 12.99 dollars.
 - Tokens are not accepted through argv; use the secure prompt or `--token-stdin`.
 - `add` does not write without `--commit`.
 - `add --file` supports simple and split expenses, but still does not write without `--commit`.
+- `scheduled add` does not write without `--commit`.
+- `scheduled edit` reads before writing and does not write without `--commit`.
 - Personal expense JSON files can contain account, category, and merchant details; keep them out of git.
 - Generated `import_id` values are stable for retries to reduce duplicate transactions.
 - New transactions are `uncleared`, unapproved, and include `source=ynab-expense-cli` in the memo.
+- Scheduled transactions include `source=ynab-expense-cli` in the memo when created or when the memo is edited.
 - This MVP only supports expenses. It does not support inflows.
 
 ## Development
@@ -322,6 +420,7 @@ Verify dry-run examples:
 ```sh
 ./ynab-expense add --budget default --account-id account-1 --amount 12.990 --currency CLP --payee "Comercio" --date 2026-06-05 --dry-run
 ./ynab-expense add --budget default --account-id account-1 --amount 12.99 --currency USD --payee "Store" --date 2026-06-05 --dry-run
+./ynab-expense scheduled add --budget default --account-id account-1 --amount 23332 --currency CLP --payee "Mercado Libre" --date 2026-08-23 --frequency never --dry-run
 ```
 
 - [ ] Evaluate whether the project architecture should evolve to support more features as the CLI grows.
