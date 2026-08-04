@@ -21,6 +21,7 @@ type scheduledAddInput struct {
 	CategoryID string
 	Memo       string
 	Frequency  string
+	FlagColor  string
 }
 
 type scheduledEditOptions struct {
@@ -34,6 +35,7 @@ type scheduledEditOptions struct {
 	categoryID string
 	memo       string
 	frequency  string
+	flagColor  string
 	dryRun     bool
 	commit     bool
 }
@@ -145,6 +147,7 @@ func (a *App) newScheduledAddCommand() *cobra.Command {
 					CategoryID:       normalized.CategoryID,
 					Memo:             normalized.Memo,
 					Frequency:        normalized.Frequency,
+					FlagColor:        normalized.FlagColor,
 				}),
 			}
 			if !commit {
@@ -184,6 +187,7 @@ func (a *App) newScheduledAddCommand() *cobra.Command {
 	cmd.Flags().StringVar(&input.CategoryID, "category-id", "", "YNAB category ID")
 	cmd.Flags().StringVar(&input.Memo, "memo", "", "Transaction memo")
 	cmd.Flags().StringVar(&input.Frequency, "frequency", "never", "Scheduled transaction frequency")
+	cmd.Flags().StringVar(&input.FlagColor, "flag-color", "", "YNAB flag color (red, orange, yellow, green, blue, or purple)")
 	cmd.Flags().StringVar(&filePath, "file", "", "Unsupported for scheduled transactions")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview scheduled transaction without sending it")
 	cmd.Flags().BoolVar(&commit, "commit", false, "Create scheduled transaction in YNAB")
@@ -248,6 +252,7 @@ func (a *App) newScheduledEditCommand() *cobra.Command {
 	cmd.Flags().StringVar(&opts.categoryID, "category-id", "", "New YNAB category ID")
 	cmd.Flags().StringVar(&opts.memo, "memo", "", "New transaction memo")
 	cmd.Flags().StringVar(&opts.frequency, "frequency", "", "New scheduled transaction frequency")
+	cmd.Flags().StringVar(&opts.flagColor, "flag-color", "", "New YNAB flag color (red, orange, yellow, green, blue, or purple)")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "Preview edit without sending it")
 	cmd.Flags().BoolVar(&opts.commit, "commit", false, "Commit edit to YNAB")
 	return cmd
@@ -383,11 +388,18 @@ func buildScheduledEditChange(cmd *cobra.Command, opts scheduledEditOptions) (sc
 	if cmd.Flags().Changed("frequency") {
 		change.Frequency = strings.TrimSpace(opts.frequency)
 	}
+	if cmd.Flags().Changed("flag-color") {
+		flagColor := strings.TrimSpace(opts.flagColor)
+		if flagColor == "" {
+			return scheduled.ChangeInput{}, fmt.Errorf("--flag-color is required")
+		}
+		change.FlagColor = &flagColor
+	}
 	return change, nil
 }
 
 func scheduledEditDetailFlagsChanged(cmd *cobra.Command) []string {
-	names := []string{"account-id", "date", "amount", "payee", "category-id", "memo", "frequency"}
+	names := []string{"account-id", "date", "amount", "payee", "category-id", "memo", "frequency", "flag-color"}
 	changed := make([]string, 0, len(names))
 	for _, name := range names {
 		if cmd.Flags().Changed(name) {

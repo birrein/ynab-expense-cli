@@ -24,6 +24,7 @@ type editOptions struct {
 	memo         string
 	cleared      string
 	approved     bool
+	flagColor    string
 	filePath     string
 	dryRun       bool
 	commit       bool
@@ -89,6 +90,7 @@ func (a *App) newEditCommand() *cobra.Command {
 	cmd.Flags().StringVar(&opts.memo, "memo", "", "New transaction memo")
 	cmd.Flags().StringVar(&opts.cleared, "cleared", "", "New cleared status")
 	cmd.Flags().BoolVar(&opts.approved, "approved", false, "New approved status")
+	cmd.Flags().StringVar(&opts.flagColor, "flag-color", "", "New YNAB flag color (red, orange, yellow, green, blue, or purple)")
 	cmd.Flags().StringVar(&opts.filePath, "file", "", "Read replacement split input from a JSON file")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "Preview edit without sending it")
 	cmd.Flags().BoolVar(&opts.commit, "commit", false, "Commit edit to YNAB")
@@ -270,6 +272,13 @@ func buildSimpleEditPatch(cmd *cobra.Command, opts editOptions) (transactions.Pa
 	if cmd.Flags().Changed("approved") {
 		input.Approved = &opts.approved
 	}
+	if cmd.Flags().Changed("flag-color") {
+		flagColor := strings.TrimSpace(opts.flagColor)
+		if flagColor == "" {
+			return transactions.PatchTransaction{}, fmt.Errorf("--flag-color is required")
+		}
+		input.FlagColor = flagColor
+	}
 	return transactions.BuildPatch(input), nil
 }
 
@@ -402,7 +411,7 @@ func (a *App) commitReplaceSplit(cmd *cobra.Command, client ynabClient, budget s
 }
 
 func editDetailFlagsChanged(cmd *cobra.Command) []string {
-	names := []string{"account-id", "date", "amount", "payee", "category-id", "memo", "cleared", "approved"}
+	names := []string{"account-id", "date", "amount", "payee", "category-id", "memo", "cleared", "approved", "flag-color"}
 	changed := make([]string, 0, len(names))
 	for _, name := range names {
 		if cmd.Flags().Changed(name) {

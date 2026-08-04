@@ -20,6 +20,7 @@ type addInput struct {
 	Date       string
 	CategoryID string
 	Memo       string
+	FlagColor  string
 }
 
 func (a *App) newAddCommand() *cobra.Command {
@@ -31,6 +32,7 @@ func (a *App) newAddCommand() *cobra.Command {
 	var date string
 	var categoryID string
 	var memo string
+	var flagColor string
 	var filePath string
 	var dryRun bool
 	var commit bool
@@ -84,6 +86,7 @@ func (a *App) newAddCommand() *cobra.Command {
 						PayeeName:        input.Payee,
 						CategoryID:       input.CategoryID,
 						Memo:             input.Memo,
+						FlagColor:        input.FlagColor,
 						Splits:           normalized.Splits,
 					}),
 				}
@@ -100,6 +103,7 @@ func (a *App) newAddCommand() *cobra.Command {
 				Date:       date,
 				CategoryID: categoryID,
 				Memo:       memo,
+				FlagColor:  flagColor,
 			}
 
 			resolvedBudget, err := a.resolveBudget(cmd, rawInput.Budget)
@@ -132,6 +136,7 @@ func (a *App) newAddCommand() *cobra.Command {
 					PayeeName:        input.Payee,
 					CategoryID:       input.CategoryID,
 					Memo:             input.Memo,
+					FlagColor:        input.FlagColor,
 				}),
 			}
 
@@ -147,6 +152,7 @@ func (a *App) newAddCommand() *cobra.Command {
 	cmd.Flags().StringVar(&date, "date", "", "Transaction date in YYYY-MM-DD")
 	cmd.Flags().StringVar(&categoryID, "category-id", "", "YNAB category ID")
 	cmd.Flags().StringVar(&memo, "memo", "", "Transaction memo")
+	cmd.Flags().StringVar(&flagColor, "flag-color", "", "YNAB flag color (red, orange, yellow, green, blue, or purple)")
 	cmd.Flags().StringVar(&filePath, "file", "", "Read expense input from a JSON file")
 	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "Preview transaction without sending it")
 	cmd.Flags().BoolVar(&commit, "commit", false, "Create transaction in YNAB")
@@ -174,7 +180,7 @@ func (a *App) resolveAccountIDFromValue(accountID string, explicit bool) (string
 }
 
 func addDetailFlagsChanged(cmd *cobra.Command) []string {
-	names := []string{"budget", "account-id", "amount", "currency", "payee", "date", "category-id", "memo"}
+	names := []string{"budget", "account-id", "amount", "currency", "payee", "date", "category-id", "memo", "flag-color"}
 	changed := make([]string, 0, len(names))
 	for _, name := range names {
 		if cmd.Flags().Changed(name) {

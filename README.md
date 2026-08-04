@@ -144,8 +144,11 @@ ynab-expense add \
   --currency CLP \
   --payee "Comercio" \
   --date 2026-06-05 \
+  --flag-color purple \
   --dry-run
 ```
+
+Use `--flag-color` to set YNAB's optional transaction flag (`red`, `orange`, `yellow`, `green`, `blue`, or `purple`). Omit it to leave the field absent.
 
 You can also keep an expense in a local JSON file and pass it with `--file`.
 
@@ -259,6 +262,7 @@ Supported simple edit fields:
 - `--memo`
 - `--cleared`
 - `--approved`
+- `--flag-color`
 
 Split line edits are handled by replacing the transaction from a JSON file. This creates the replacement first and deletes the original only after the replacement succeeds:
 
@@ -295,6 +299,8 @@ ynab-expense scheduled add \
   --memo "Mouse 2/6" \
   --frequency never
 ```
+
+Scheduled creates also accept the optional `--flag-color` flag and preserve an existing flag when scheduled edits omit it.
 
 Write the scheduled transaction only with `--commit`:
 
@@ -338,6 +344,7 @@ Supported scheduled edit fields:
 - `--category-id`
 - `--memo`
 - `--frequency`
+- `--flag-color`
 
 Supported frequencies:
 

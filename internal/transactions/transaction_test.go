@@ -340,6 +340,20 @@ func TestBuildExpenseWithoutSplitsKeepsSimplePayload(t *testing.T) {
 	}
 }
 
+func TestBuildExpenseIncludesFlagColor(t *testing.T) {
+	tx := BuildExpense(Input{
+		AccountID:        "account-1",
+		Date:             "2026-08-23",
+		AmountMilliunits: -23332000,
+		PayeeName:        "Mercado Libre",
+		FlagColor:        " purple ",
+	})
+
+	if tx.FlagColor != "purple" {
+		t.Fatalf("FlagColor = %q, want purple", tx.FlagColor)
+	}
+}
+
 func TestBuildPatchTrimsAndIncludesExplicitFields(t *testing.T) {
 	amount := int64(-3990000)
 	categoryID := " category-monthly "
@@ -402,5 +416,20 @@ func TestBuildPatchOmitsUnsetOptionalFields(t *testing.T) {
 	}
 	if !strings.Contains(got, `"id":"tx-123"`) {
 		t.Fatalf("patch JSON %s missing id", got)
+	}
+}
+
+func TestBuildPatchIncludesFlagColor(t *testing.T) {
+	patch := BuildPatch(PatchInput{ID: "tx-123", FlagColor: " purple "})
+
+	if patch.FlagColor != "purple" {
+		t.Fatalf("FlagColor = %q, want purple", patch.FlagColor)
+	}
+	body, err := json.Marshal(PatchTransactionsRequest{Transactions: []PatchTransaction{patch}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"flag_color":"purple"`) {
+		t.Fatalf("patch JSON %s missing flag_color", body)
 	}
 }

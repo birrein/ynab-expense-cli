@@ -36,6 +36,7 @@ type Input struct {
 	CategoryID       string
 	Memo             string
 	Frequency        string
+	FlagColor        string
 }
 
 type ChangeInput struct {
@@ -46,6 +47,7 @@ type ChangeInput struct {
 	CategoryID *string
 	Memo       *string
 	Frequency  string
+	FlagColor  *string
 }
 
 type SaveScheduledTransaction struct {
@@ -102,6 +104,9 @@ func BuildExpense(input Input) SaveScheduledTransaction {
 	if categoryID := strings.TrimSpace(input.CategoryID); categoryID != "" {
 		tx.CategoryID = &categoryID
 	}
+	if flagColor := strings.TrimSpace(input.FlagColor); flagColor != "" {
+		tx.FlagColor = &flagColor
+	}
 	return tx
 }
 
@@ -155,6 +160,10 @@ func BuildFromDetail(detail Detail, change ChangeInput) (SaveScheduledTransactio
 	}
 	if strings.TrimSpace(change.Frequency) != "" {
 		tx.Frequency = strings.TrimSpace(change.Frequency)
+	}
+	if change.FlagColor != nil {
+		flagColor := strings.TrimSpace(*change.FlagColor)
+		tx.FlagColor = &flagColor
 	}
 
 	return tx, nil

@@ -478,6 +478,34 @@ func TestScheduledAddDryRunDoesNotRequireToken(t *testing.T) {
 			t.Fatalf("scheduled add dry-run output missing %s, got %q", want, output)
 		}
 	}
+	if strings.Contains(output, `"flag_color"`) {
+		t.Fatalf("add dry-run unexpectedly included omitted flag color, got %q", output)
+	}
+}
+
+func TestScheduledAddDryRunIncludesFlagColor(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"scheduled", "add",
+		"--budget", "default",
+		"--account-id", "account-123",
+		"--amount", "23.332",
+		"--currency", "CLP",
+		"--payee", "Mercado Libre",
+		"--date", scheduledFutureDate(),
+		"--flag-color", "purple",
+	)
+
+	if err != nil {
+		t.Fatalf("scheduled add dry-run returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"flag_color": "purple"`) {
+		t.Fatalf("scheduled add dry-run output missing flag color, got %q", out.String())
+	}
 }
 
 func TestScheduledAddDryRunUsesConfiguredBudgetAndAccount(t *testing.T) {
@@ -556,6 +584,7 @@ func TestScheduledAddCommitSendsScheduledTransaction(t *testing.T) {
 		"--category-id", "category-123",
 		"--memo", "Mouse 2/6",
 		"--frequency", "monthly",
+		"--flag-color", "purple",
 		"--commit",
 	)
 
@@ -580,6 +609,9 @@ func TestScheduledAddCommitSendsScheduledTransaction(t *testing.T) {
 	}
 	if tx.Frequency != "monthly" {
 		t.Fatalf("frequency = %q", tx.Frequency)
+	}
+	if tx.FlagColor == nil || *tx.FlagColor != "purple" {
+		t.Fatalf("flag color = %#v, want purple", tx.FlagColor)
 	}
 	if !strings.Contains(out.String(), `"scheduled-123"`) {
 		t.Fatalf("output missing response JSON, got %q", out.String())
@@ -794,12 +826,50 @@ func TestScheduledEditDryRunPrintsBeforeAndPayload(t *testing.T) {
 			t.Fatalf("scheduled edit output missing %s, got %q", want, output)
 		}
 	}
+	if strings.Contains(output, `"flag_color"`) {
+		t.Fatalf("scheduled edit dry-run unexpectedly included omitted flag color, got %q", output)
+	}
+}
+
+func TestScheduledEditDryRunIncludesFlagColorChange(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getScheduledTransactionResponse: []byte(`{"data":{"scheduled_transaction":{"id":"scheduled-123","date_next":"2026-08-23","frequency":"monthly","amount":-1000000,"account_id":"account-1","subtransactions":[]}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", "scheduled-123", "--flag-color", "purple")
+	if err != nil {
+		t.Fatalf("scheduled edit dry-run returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"flag_color": "purple"`) {
+		t.Fatalf("scheduled edit dry-run output missing flag color, got %q", out.String())
+	}
+	if client.updateScheduledTransactionID != "" {
+		t.Fatalf("scheduled edit wrote without --commit: %q", client.updateScheduledTransactionID)
+	}
+}
+
+func TestScheduledEditDryRunPreservesExistingFlagColor(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getScheduledTransactionResponse: []byte(`{"data":{"scheduled_transaction":{"id":"scheduled-123","date_next":"2026-08-23","frequency":"monthly","amount":-1000000,"account_id":"account-1","memo":"old memo","flag_color":"purple","subtransactions":[]}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "scheduled", "edit", "--id", "scheduled-123", "--memo", "Updated memo")
+	if err != nil {
+		t.Fatalf("scheduled edit dry-run returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"flag_color": "purple"`) {
+		t.Fatalf("scheduled edit dry-run dropped existing flag color, got %q", out.String())
+	}
 }
 
 func TestScheduledEditCommitUpdatesScheduledTransaction(t *testing.T) {
 	var out bytes.Buffer
 	client := &fakeYNABClient{
-		getScheduledTransactionResponse:    []byte(`{"data":{"scheduled_transaction":{"id":"scheduled-123","date_next":"2026-08-23","frequency":"monthly","amount":-1000000,"account_id":"account-1","payee_id":"payee-1","category_id":"old-category","memo":"old memo","subtransactions":[]}}}`),
+		getScheduledTransactionResponse:    []byte(`{"data":{"scheduled_transaction":{"id":"scheduled-123","date_next":"2026-08-23","frequency":"monthly","amount":-1000000,"account_id":"account-1","payee_id":"payee-1","category_id":"old-category","memo":"old memo","flag_color":"red","subtransactions":[]}}}`),
 		updateScheduledTransactionResponse: []byte(`{"data":{"scheduled_transaction":{"id":"scheduled-123"}}}`),
 	}
 	cmd := commandWithFakeClient(&out, client)
@@ -814,6 +884,7 @@ func TestScheduledEditCommitUpdatesScheduledTransaction(t *testing.T) {
 		"--payee", "New Payee",
 		"--date", date,
 		"--frequency", "never",
+		"--flag-color", "purple",
 		"--commit",
 	)
 
@@ -841,6 +912,9 @@ func TestScheduledEditCommitUpdatesScheduledTransaction(t *testing.T) {
 	}
 	if tx.Frequency != "never" {
 		t.Fatalf("frequency = %q", tx.Frequency)
+	}
+	if tx.FlagColor == nil || *tx.FlagColor != "purple" {
+		t.Fatalf("flag color = %#v, want purple", tx.FlagColor)
 	}
 	if !strings.Contains(out.String(), `"scheduled-123"`) {
 		t.Fatalf("commit output missing response JSON, got %q", out.String())
@@ -918,6 +992,35 @@ func TestAddDryRunDoesNotRequireToken(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("add dry-run output missing %s, got %q", want, output)
 		}
+	}
+	if strings.Contains(output, `"flag_color"`) {
+		t.Fatalf("add dry-run unexpectedly included omitted flag color, got %q", output)
+	}
+}
+
+func TestAddDryRunIncludesFlagColor(t *testing.T) {
+	var out bytes.Buffer
+	cmd := newRootCommandWithDeps(&out, &out, cliDeps{
+		tokenResolver: failingTokenResolver{t: t},
+	})
+
+	err := executeCommand(cmd,
+		"add",
+		"--budget", "default",
+		"--account-id", "account-123",
+		"--amount", "12.990",
+		"--currency", "CLP",
+		"--payee", "Comercio",
+		"--date", "2026-06-05",
+		"--flag-color", "purple",
+		"--dry-run",
+	)
+
+	if err != nil {
+		t.Fatalf("add dry-run returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"flag_color": "purple"`) {
+		t.Fatalf("add dry-run output missing flag color, got %q", out.String())
 	}
 }
 
@@ -1565,6 +1668,25 @@ func TestEditDryRunPrintsBeforeAndPatch(t *testing.T) {
 	}
 }
 
+func TestEditDryRunIncludesFlagColor(t *testing.T) {
+	var out bytes.Buffer
+	client := &fakeYNABClient{
+		getTransactionResponse: []byte(`{"data":{"transaction":{"id":"tx-123","account_id":"account-1","date":"2026-06-27","amount":-3990000,"payee_name":"Uber","memo":"old memo","subtransactions":[]}}}`),
+	}
+	cmd := commandWithFakeClient(&out, client)
+
+	err := executeCommand(cmd, "edit", "--id", "tx-123", "--flag-color", "purple")
+	if err != nil {
+		t.Fatalf("edit dry-run returned error: %v", err)
+	}
+	if !strings.Contains(out.String(), `"flag_color": "purple"`) {
+		t.Fatalf("edit dry-run output missing flag color, got %q", out.String())
+	}
+	if len(client.patchTransactionsPayload.Transactions) != 0 {
+		t.Fatalf("edit wrote without --commit: %#v", client.patchTransactionsPayload)
+	}
+}
+
 func TestEditRejectsBadTransactionResponse(t *testing.T) {
 	cases := map[string]string{
 		"null transaction": `{"data":{"transaction":null}}`,
@@ -1633,6 +1755,7 @@ func TestEditCommitPatchesTransaction(t *testing.T) {
 		"--date", "2026-06-27",
 		"--payee", "Uber",
 		"--approved=false",
+		"--flag-color", "purple",
 		"--commit",
 	)
 
@@ -1654,6 +1777,9 @@ func TestEditCommitPatchesTransaction(t *testing.T) {
 	}
 	if patch.Approved == nil || *patch.Approved {
 		t.Fatalf("approved = %#v, want false", patch.Approved)
+	}
+	if patch.FlagColor != "purple" {
+		t.Fatalf("flag color = %q, want purple", patch.FlagColor)
 	}
 	if !strings.Contains(out.String(), `"transaction_ids"`) {
 		t.Fatalf("edit commit output missing response JSON, got %q", out.String())

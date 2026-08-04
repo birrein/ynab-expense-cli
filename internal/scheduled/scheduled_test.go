@@ -197,6 +197,24 @@ func TestBuildFromDetailPreservesFlagColor(t *testing.T) {
 	}
 }
 
+func TestBuildFromDetailAppliesFlagColorChange(t *testing.T) {
+	detail := Detail{
+		ID:        "scheduled-1",
+		DateNext:  "2026-08-23",
+		Frequency: "monthly",
+		Amount:    -1000000,
+		AccountID: "account-1",
+	}
+
+	got, err := BuildFromDetail(detail, ChangeInput{FlagColor: ptr("purple")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FlagColor == nil || *got.FlagColor != "purple" {
+		t.Fatalf("flag color = %#v, want purple", got.FlagColor)
+	}
+}
+
 func TestBuildFromDetailPreservesUnchangedMemoExactly(t *testing.T) {
 	memo := "  keep surrounding whitespace  "
 	detail := Detail{

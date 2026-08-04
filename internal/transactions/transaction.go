@@ -15,6 +15,7 @@ type Input struct {
 	PayeeName        string
 	CategoryID       string
 	Memo             string
+	FlagColor        string
 	Splits           []SplitInput
 }
 
@@ -34,6 +35,7 @@ type Transaction struct {
 	Memo            string           `json:"memo"`
 	Cleared         string           `json:"cleared"`
 	Approved        bool             `json:"approved"`
+	FlagColor       string           `json:"flag_color,omitempty"`
 	ImportID        string           `json:"import_id"`
 	Subtransactions []Subtransaction `json:"subtransactions,omitempty"`
 }
@@ -64,6 +66,7 @@ type PatchTransaction struct {
 	Memo       *string `json:"memo,omitempty"`
 	Cleared    string  `json:"cleared,omitempty"`
 	Approved   *bool   `json:"approved,omitempty"`
+	FlagColor  string  `json:"flag_color,omitempty"`
 }
 
 type PatchInput struct {
@@ -77,6 +80,7 @@ type PatchInput struct {
 	Memo       *string
 	Cleared    string
 	Approved   *bool
+	FlagColor  string
 }
 
 func BuildExpense(input Input) Transaction {
@@ -85,6 +89,7 @@ func BuildExpense(input Input) Transaction {
 	payeeName := strings.TrimSpace(input.PayeeName)
 	categoryID := strings.TrimSpace(input.CategoryID)
 	memo := AuditMemo(input.Memo)
+	flagColor := strings.TrimSpace(input.FlagColor)
 	subtransactions := buildSubtransactions(input.Splits)
 	transaction := Transaction{
 		AccountID:       accountID,
@@ -94,6 +99,7 @@ func BuildExpense(input Input) Transaction {
 		Memo:            memo,
 		Cleared:         "uncleared",
 		Approved:        false,
+		FlagColor:       flagColor,
 		ImportID:        StableImportID(accountID, date, input.AmountMilliunits, payeeName, memo, input.Splits),
 		Subtransactions: subtransactions,
 	}
@@ -115,6 +121,7 @@ func BuildPatch(input PatchInput) PatchTransaction {
 		PayeeName: strings.TrimSpace(input.PayeeName),
 		Cleared:   strings.TrimSpace(input.Cleared),
 		Approved:  input.Approved,
+		FlagColor: strings.TrimSpace(input.FlagColor),
 	}
 	if input.CategoryID != nil {
 		categoryID := strings.TrimSpace(*input.CategoryID)
