@@ -1,0 +1,53 @@
+import assert from 'node:assert/strict';
+import {readFile,lstat} from 'node:fs/promises';
+import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
+import {isAbsolute} from 'node:path';
+import {BUDGETS} from './actual-daily-policy.mjs';
+const canon=v=>Array.isArray(v)?v.map(canon):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canon(v[k])])):v;
+const eq=(a,b,m)=>assert.deepEqual(canon(a),canon(b),m);
+const hash=v=>createHash('sha256').update(JSON.stringify(canon(v))).digest('hex');
+const validDate=v=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v)&&!Number.isNaN(Date.parse(v+'T12:00:00Z'))&&new Date(v+'T12:00:00Z').toISOString().slice(0,10)===v;
+const archiveCheck=String.raw`
+import sys,json,io,zipfile,csv,base64,decimal
+x=json.load(sys.stdin);z=zipfile.ZipFile(io.BytesIO(base64.b64decode(x['archive'],validate=True)))
+n='Uber Data/Eats/eats_order_details-0.csv'
+assert z.namelist().count(n)==1, 'Missing or ambiguous export'
+i=z.getinfo(n);assert i.file_size<=20000000, 'Export too large'
+r=csv.DictReader(io.TextIOWrapper(z.open(i),encoding='utf-8-sig',newline=''))
+fields=['Restaurant_Name','Request_Time_Local','Order_Status','Item_Name','Item_quantity','Item_Price','Order_Price','Currency','Order_UUID']
+assert r.fieldnames and all(k in r.fieldnames for k in fields), 'Missing export columns'
+rows=list(r);assert rows and len(rows)<=100000, 'Invalid export'
+q=x['order'];same=[v for v in rows if v['Request_Time_Local'][:10]==q['timestamp'][:10] and v['Restaurant_Name'].casefold()==q['merchant'].casefold() and v['Order_Status'].casefold()=='completed']
+ids={v['Order_UUID'] for v in same};assert ids=={q['id']}, 'Ambiguous same-day merchant orders'
+wanted=[v for v in same if v['Order_UUID']==q['id']]
+assert wanted and all(v['Request_Time_Local']==q['timestamp'] and v['Currency']=='CLP' and decimal.Decimal(v['Order_Price'])*100==-x['amount'] for v in wanted), 'Order mismatch'
+items=[v for v in wanted if v['Item_Name'].casefold()==q['item'].casefold() and decimal.Decimal(v['Item_quantity'])==q['itemQuantity'] and decimal.Decimal(v['Item_Price'])*100==q['itemAmount']]
+assert len(items)==1, 'Item not unique or mismatched'
+print(json.dumps({'verified':True}))
+`;
+async function verifyArchive(p){
+ assert(isAbsolute(p.providerArchive),'Private absolute archive required');assert(/^[a-f0-9]{64}$/.test(p.providerSha256),'Invalid archive digest');const st=await lstat(p.providerArchive);assert(st.isFile()&&st.size>0&&st.size<=25000000,'Invalid archive');const data=await readFile(p.providerArchive);assert.equal(createHash('sha256').update(data).digest('hex'),p.providerSha256,'Archive changed');
+ execFileSync('/usr/bin/python3',['-c',archiveCheck],{input:JSON.stringify({archive:data.toString('base64'),order:p.order,amount:p.retainedParent.amount}),encoding:'utf8',maxBuffer:1000000,stdio:['pipe','pipe','pipe']});
+}
+function validateParent(t,owned){
+ assert(t&&typeof t.id==='string'&&t.id&&validDate(t.date)&&t.is_parent===true&&!t.is_child&&!t.parent_id&&!t.transfer_id&&!t.reconciled&&!t.cleared&&!t.schedule&&!t.tombstone&&!t.starting_balance_flag&&t.category===null,'Unsupported split');assert(Number.isSafeInteger(t.amount)&&t.amount<0&&Array.isArray(t.subtransactions)&&t.subtransactions.length>=2,'Invalid split');if(!owned)assert(!t.imported_id,'Old split imported');
+ let total=0;const ids=new Set(),cats=new Set();for(const c of t.subtransactions){assert(c.id&&!ids.has(c.id)&&c.is_child&&!c.is_parent&&c.parent_id===t.id&&c.account===t.account&&c.date===t.date&&Number.isSafeInteger(c.amount)&&c.amount<0&&c.category&&!cats.has(c.category)&&!c.transfer_id&&!c.reconciled&&!c.cleared&&!c.schedule&&!c.imported_id&&!c.tombstone&&!c.starting_balance_flag,'Invalid child');ids.add(c.id);cats.add(c.category);total+=c.amount;}assert.equal(total,t.amount,'Split total mismatch');
+}
+export async function classifyUberSplitDuplicate(p,s,l){
+ eq(Object.keys(p).sort(),['uberSplitDuplicate','currency','oldParent','retainedParent','retainedRecord','receiptMessageId','statementFileId','providerArchive','providerSha256','order','evidence'].sort(),'Unexpected fields');assert(p.uberSplitDuplicate===true&&p.currency==='CLP'&&Object.hasOwn(BUDGETS,p.currency),'Invalid operation');assert(/^[a-f0-9]{8,}$/.test(p.receiptMessageId)&&/^[A-Za-z0-9_-]{8,}$/.test(p.statementFileId)&&typeof p.evidence==='string'&&p.evidence.trim().length>=30,'Evidence missing');assert(!Object.values(l.uberSplitDuplicates??{}).some(a=>a.status==='pending'),'Pending audit requires investigation');
+ const old=p.oldParent,keep=p.retainedParent;validateParent(old,false);validateParent(keep,true);assert(old.id!==keep.id&&old.account===keep.account&&old.date===keep.date,'Account or dates differ');assert(s.accounts.some(a=>a.id===old.account&&!a.closed&&!a.offbudget),'Account unavailable');assert(keep.imported_id==='gmail:'+p.receiptMessageId&&(keep.notes??'').includes('https://mail.google.com/mail/u/0/#all/'+p.receiptMessageId),'Retained receipt mismatch');eq(l.records?.[p.receiptMessageId],p.retainedRecord,'Ledger record mismatch');let rec=p.retainedRecord;assert(rec?.status==='registered'&&rec.verifiedAt&&rec.transactionId===keep.id&&rec.account===keep.account&&rec.amount===keep.amount&&rec.date===keep.date&&rec.currency===p.currency&&rec.sourceIds?.includes(p.receiptMessageId),'Unverified retained record');
+ const q=p.order;eq(Object.keys(q).sort(),['id','merchant','timestamp','item','itemQuantity','itemAmount','oldChildId','noteToken'].sort(),'Order shape');assert(typeof q.id==='string'&&q.id.length>=5&&typeof q.merchant==='string'&&q.merchant.length>=5&&typeof q.item==='string'&&q.item.length>=10&&/^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/.test(q.timestamp)&&q.timestamp.slice(0,10)===old.date&&Number.isSafeInteger(q.itemQuantity)&&q.itemQuantity>0&&Number.isSafeInteger(q.itemAmount)&&q.itemAmount>0&&typeof q.noteToken==='string'&&q.noteToken.length>=8,'Invalid order');
+ const child=old.subtransactions.filter(c=>c.id===q.oldChildId);assert.equal(child.length,1,'Historical item absent');assert.equal(child[0].amount,-q.itemAmount,'Historical item amount differs');assert((child[0].notes??'').toLocaleLowerCase().includes(q.noteToken.toLocaleLowerCase())&&q.item.toLocaleLowerCase().includes(q.noteToken.toLocaleLowerCase()),'Item identity differs');assert(keep.subtransactions.some(c=>c.category===child[0].category),'Item category absent in retained split');assert(new RegExp('(?:^|\\D)'+q.itemQuantity+'(?:\\D|$)').test(child[0].notes??''),'Historical quantity absent');const merchantBase=q.merchant.replace(/\s*\([^)]*\)\s*$/,'').trim().toLocaleLowerCase();assert(merchantBase.length>=5&&(old.notes??'').toLocaleLowerCase().includes(merchantBase),'Old merchant absent');
+ for(const t of [old,...old.subtransactions]){assert(!/(https?:\/\/|\bsource\s*=|#[\p{L}\p{N}_])/iu.test(t.notes??''),'Old split has source or tag');}
+ const oldIds=[old.id,...old.subtransactions.map(t=>t.id)];for(const [key,v] of Object.entries(l)){if(key==='activeRun'||key==='uberSplitDuplicates')continue;const str=JSON.stringify(v);for(const id of oldIds)assert(!str?.includes(id),'Old split referenced by ledger');}
+ for(const t of [old,keep]){let found=s.transactions.filter(x=>x.id===t.id);assert.equal(found.length,1,'Split missing');eq(found[0],t,'Snapshot changed');}assert(!s.transactions.some(t=>![old.id,keep.id].includes(t.id)&&t.account===old.account&&t.date===old.date&&t.is_parent&&[old.amount,keep.amount].includes(t.amount)),'Additional candidate split');
+ await verifyArchive(p);const stable=structuredClone(l);delete stable.activeRun;return {action:'retire',oldId:old.id,retainedId:keep.id,balanceDelta:-old.amount,planHash:hash({candidate:p,snapshot:s,ledger:stable})};
+}
+export async function retireUberSplitDuplicate(p,commit,d){
+ assert(Object.hasOwn(BUDGETS,p.currency),'Unsupported budget');if(commit)assert(/^[a-f0-9]{64}$/.test(d.expectedPlan??''),'Exact plan required');let l=commit?await d.requireRun():await d.readState();assert(!Object.values(l.uberSplitDuplicates??{}).some(x=>x.status==='pending'),'Pending audit requires investigation');const existing=commit?l.uberSplitDuplicates?.[d.expectedPlan]:null;
+ if(existing){assert(existing.status==='complete'&&existing.backup&&existing.verifiedAt,'Incomplete audit');eq(existing.candidate,p,'Candidate changed');await verifyArchive(p);let {api}=await d.connect(BUDGETS[p.currency].syncId);try{let s=await d.snapshot(api);assert(!s.transactions.some(t=>t.id===p.oldParent.id),'Retired split present');eq(s.transactions.find(t=>t.id===p.retainedParent.id),p.retainedParent,'Retained split changed');return {action:'existing',verified:true,backup:existing.backup};}finally{await api.shutdown()}}
+ let {api}=await d.connect(BUDGETS[p.currency].syncId),before,plan,dir;
+ try{before=await d.snapshot(api);before.dashboards=await d.readDashboard(api);plan=await classifyUberSplitDuplicate(p,before,l);if(!commit)return {...plan,candidate:p};assert.equal(plan.planHash,d.expectedPlan,'Plan changed');dir=await d.backup(api,p.currency,before);await d.json(dir+'/uber-split-duplicate.json',{candidate:p,plan});await api.sync();let latest=await d.snapshot(api);latest.dashboards=await d.readDashboard(api);eq(latest,before,'Budget changed');l=await d.requireRun();assert.equal((await classifyUberSplitDuplicate(p,latest,l)).planHash,d.expectedPlan,'Plan changed');l.uberSplitDuplicates??={};assert(!l.uberSplitDuplicates[d.expectedPlan],'Audit exists');l.uberSplitDuplicates[d.expectedPlan]={status:'pending',candidate:p,planHash:d.expectedPlan,backup:dir};await d.save(l);await d.requireRun();await api.deleteTransaction(p.oldParent.id);await api.sync();}finally{await api.shutdown()}
+ ({api}=await d.connect(BUDGETS[p.currency].syncId));try{let after=await d.snapshot(api);after.dashboards=await d.readDashboard(api);let expected=structuredClone(before);expected.transactions=expected.transactions.filter(t=>t.id!==p.oldParent.id);expected.balances[p.oldParent.account]-=p.oldParent.amount;let {transactions:actual,...ar}=after,{transactions:wanted,...wr}=expected;eq(ar,wr,'Unrelated budget changed');assert.equal(actual.length,wanted.length);const map=new Map(actual.map(t=>[t.id,t]));assert.equal(map.size,actual.length);for(const t of wanted)eq(map.get(t.id),t,'Unrelated transaction changed');await d.json(dir+'/after.json',after);l=await d.requireRun();let audit=l.uberSplitDuplicates?.[d.expectedPlan];assert.equal(audit?.status,'pending');eq(audit.candidate,p,'Pending audit changed');audit.status='complete';audit.verifiedAt=new Date().toISOString();await d.save(l);return {...plan,verified:true,backup:dir};}finally{await api.shutdown()}
+}

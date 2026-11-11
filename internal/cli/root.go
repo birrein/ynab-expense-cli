@@ -49,6 +49,7 @@ type ynabClient interface {
 }
 
 type cliDeps struct {
+	actualRunner      func(context.Context, []string, io.Writer, io.Writer) error
 	tokenResolver     tokenResolver
 	tokenStore        tokenStore
 	configStore       configStore
@@ -108,6 +109,7 @@ func newRootCommandWithDeps(out io.Writer, errOut io.Writer, deps cliDeps) *cobr
 	cmd.SetOut(out)
 	cmd.SetErr(errOut)
 	cmd.AddCommand(app.newAuthCommand())
+	cmd.AddCommand(app.newActualCommand())
 	cmd.AddCommand(app.newBudgetsCommand())
 	cmd.AddCommand(app.newAccountsCommand())
 	cmd.AddCommand(app.newCategoriesCommand())

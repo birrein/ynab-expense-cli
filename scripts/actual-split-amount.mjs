@@ -1,0 +1,27 @@
+import assert from 'node:assert/strict';
+import {BUDGETS} from './actual-daily-policy.mjs';
+const canonical=v=>Array.isArray(v)?v.map(canonical):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,canonical(v[k])])):v;
+const eq=(a,b,m)=>assert.deepEqual(canonical(a),canonical(b),m);
+function changes(p){return p.childAmounts??[{childId:p.childId,newAmount:p.newChildAmount}]}
+function corrected(p){const t=structuredClone(p.oldParent);t.amount=p.newParentAmount;for(const c of changes(p))t.subtransactions.find(x=>x.id===c.childId).amount=c.newAmount;return t}
+export function classifySplitAmount(p,s,ledger){
+ const multi=Object.hasOwn(p,'childAmounts');eq(Object.keys(p).sort(),['currency','evidence','historicalSplitAmountCorrection','merchantUrl','newParentAmount','oldParent','statementId',...(multi?['childAmounts']:['childId','newChildAmount'])].sort());
+ assert.equal(p.historicalSplitAmountCorrection,true);assert(BUDGETS[p.currency]);assert(/^[A-Za-z0-9_-]{8,}$/.test(p.statementId));assert(/^https:\/\/[^\s/]+\/\S+$/u.test(p.merchantUrl));assert(typeof p.evidence==='string'&&p.evidence.trim().length>=30);
+ const old=p.oldParent;assert(old?.id&&old.account&&old.date&&Number.isSafeInteger(old.amount)&&old.amount<0);assert(old.is_parent&&!old.is_child&&!old.transfer_id&&!old.reconciled&&!old.schedule&&!old.imported_id&&old.category==null);assert(Array.isArray(old.subtransactions)&&old.subtransactions.length>=2);
+ let ids=new Set([old.id]);for(const c of old.subtransactions){assert(c.id&&c.is_child&&c.parent_id===old.id&&c.account===old.account&&c.date===old.date&&c.category&&!c.transfer_id&&!c.schedule&&!c.reconciled&&Number.isSafeInteger(c.amount)&&c.amount<0&&!ids.has(c.id));ids.add(c.id)}
+ assert.equal(old.subtransactions.reduce((n,c)=>n+c.amount,0),old.amount);if(multi)assert(Array.isArray(p.childAmounts)&&p.childAmounts.length>=2);const edits=changes(p),seen=new Set();let calculated=old.amount;for(const c of edits){eq(Object.keys(c).sort(),['childId','newAmount']);const child=old.subtransactions.find(x=>x.id===c.childId);assert(child&&!seen.has(c.childId)&&Number.isSafeInteger(c.newAmount)&&c.newAmount<0&&c.newAmount!==child.amount);seen.add(c.childId);calculated+=c.newAmount-child.amount;assert(Number.isSafeInteger(calculated))}assert(Number.isSafeInteger(p.newParentAmount)&&p.newParentAmount<0);assert.equal(p.newParentAmount,calculated);
+ assert(s.accounts.some(a=>a.id===old.account&&!a.closed&&!a.offbudget));for(const r of Object.values(ledger.cashflows??{}))assert(![r.id,r.counterpartId].some(id=>ids.has(id)),'Ledger owned');for(const r of Object.values(ledger.records??{}))assert(!ids.has(r.transactionId),'Ledger owned');
+ const found=s.transactions.filter(t=>t.id===old.id);assert.equal(found.length,1);const audit=ledger.historicalSplitAmountCorrections?.[old.id];if(audit){eq(audit.candidate,p,'Audit conflict');eq(found[0],corrected(p),'Corrected split differs');return {action:'existing',id:old.id}}
+ eq(found[0],old,'Split identity mismatch or unverified previous write');const details=edits.map(c=>({childId:c.childId,oldAmount:old.subtransactions.find(x=>x.id===c.childId).amount,newAmount:c.newAmount}));return multi?{action:'correct',id:old.id,oldParentAmount:old.amount,newParentAmount:p.newParentAmount,childAmounts:details}:{action:'correct',id:old.id,childId:p.childId,oldParentAmount:old.amount,newParentAmount:p.newParentAmount,oldChildAmount:details[0].oldAmount,newChildAmount:p.newChildAmount};
+}
+export async function correctSplitAmount(p,commit,d){
+ let ledger=commit?await d.requireRun():await d.readState(),{api}=await d.connect(BUDGETS[p.currency].syncId),before,action,dir;
+ try{before=await d.snapshot(api);action=classifySplitAmount(p,before,ledger);if(!commit)return {...action,candidate:p};if(action.action==='existing')return {...action,verified:true,backup:ledger.historicalSplitAmountCorrections[p.oldParent.id].backup};
+  dir=await d.backup(api,p.currency,before);await d.json(dir+'/split-amount-correction.json',{candidate:p});await api.sync();eq(await d.snapshot(api),before,'Budget changed');classifySplitAmount(p,before,await d.requireRun());
+  const target=corrected(p);await api.updateTransaction(target.id,{amount:target.amount,payee:target.payee,subtransactions:target.subtransactions});let updated;for(let i=0;i<50;i++){updated=(await api.getTransactions(target.account,target.date,target.date)).find(t=>t.id===target.id);if(updated&&updated.amount===target.amount)break;await new Promise(r=>setTimeout(r,100))}eq(updated,target,'Updated split differs; inspect backup and live state');await api.sync();
+ }finally{await api.shutdown()}
+ ({api}=await d.connect(BUDGETS[p.currency].syncId));try{const after=await d.snapshot(api),expected=structuredClone(before),old=p.oldParent;expected.transactions=expected.transactions.map(t=>t.id===old.id?corrected(p):t);expected.balances[old.account]+=p.newParentAmount-old.amount;
+  const {transactions:at,...ar}=after,{transactions:bt,...br}=expected;eq(ar,br,'Unrelated state or balances changed');assert.equal(at.length,bt.length);const byId=new Map(at.map(t=>[t.id,t]));assert.equal(byId.size,at.length);for(const t of bt)eq(byId.get(t.id),t,'Transaction differs');
+  await d.json(dir+'/after.json',after);ledger=await d.requireRun();ledger.historicalSplitAmountCorrections??={};ledger.historicalSplitAmountCorrections[old.id]={candidate:p,backup:dir,verifiedAt:new Date().toISOString()};await d.save(ledger);return {...action,verified:true,backup:dir};
+ }finally{await api.shutdown()}
+}

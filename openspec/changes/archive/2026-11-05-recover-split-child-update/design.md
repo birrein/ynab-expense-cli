@@ -1,0 +1,2 @@
+## Approach
+Fail closed on the unsafe operation. Compare the live state to the pre-incident backup, allowing only the exact documented damaged child, parent error and corresponding balance difference. Recover by updating the full parent with both original children and the amended note. Take a new backup, recheck lease and state, sync, independently download and compare the full budget against the original snapshot with only the note changed. No other discrepancy is permitted.

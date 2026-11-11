@@ -16,3 +16,6 @@ local-notes/
 .github/prompts/
 .github/skills/
 .opencode/
+
+# Pinned Node runtime for the Actual daily adapter.
+scripts/actual-runtime/node_modules/

@@ -1,0 +1,26 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import * as actual from './actual-runtime/node_modules/@actual-app/api/dist/index.js';
+import {reconstructHeldRefund} from './actual-marketplace-held-refund.mjs';
+
+test('official Actual API preserves signed sale reversals and reciprocal temporary holds through account closure',async()=>{
+ const tmp=await mkdtemp(join(tmpdir(),'actual-hold-refund-'));try{
+  const rt=await actual.init({dataDir:tmp});await rt.send('create-budget',{budgetName:'Offline canceled marketplace test',avoidUpload:true});
+  const wallet=await actual.createAccount({name:'Synthetic wallet',offbudget:false,closed:false});
+  const payee=await actual.createPayee({name:'Synthetic marketplace'}),other=await actual.createPayee({name:'Synthetic other'});
+  const group=await actual.createCategoryGroup({name:'Revenue',is_income:true}),income=await actual.createCategory({name:'Sales',group_id:group,is_income:true});
+  for(const t of [{date:'2024-11-05',amount:-420000,payee,imported_id:'bank:shipping',notes:'shipping'},{date:'2024-11-09',amount:-700000,payee,imported_id:'bank:mediation',notes:'mediation'},{date:'2024-11-05',amount:-3830100,payee:other,notes:'withdrawal'},{date:'2024-11-09',amount:5000000,payee:other,notes:'deposit'},{date:'2024-11-05',amount:100,payee:other,notes:'interest'}])await actual.addTransactions(wallet,[t],{runTransfers:false,learnCategories:false});
+  const snapshot=async()=>{const accounts=await actual.getAccounts(),transactions=[];for(const a of accounts)transactions.push(...await actual.getTransactions(a.id,'1900-01-01','2100-01-01'));const balances={};for(const a of accounts)balances[a.id]=await actual.getAccountBalance(a.id,'2100-01-01');return {accounts,transactions,categories:await actual.getCategories(),payees:await actual.getPayees(),rules:await actual.getRules(),schedules:await actual.getSchedules(),balances}};
+  const before=await snapshot(),fees=before.transactions.filter(t=>['bank:shipping','bank:mediation'].includes(t.imported_id));assert.equal(fees.length,2);
+  const record=t=>({id:t.id,type:'expense',currency:'CLP',account:wallet,date:t.date,amount:t.amount,category:null,status:'review',verifiedAt:'2026-11-01T00:00:00Z',backup:'/backup',driveFileIds:['report12345']});let ledger={cashflows:Object.fromEntries(fees.map(t=>[t.imported_id,record(t)]))};
+  const p={marketplaceHeldRefund:true,currency:'CLP',wallet,holdingName:'Marketplace fondos retenidos historico',incomeCategoryName:'Ajustes de ventas canceladas',incomeGroup:group,payee,reference:'claim12345',reportId:'report12345',claimFileId:'claim123456',statementIds:['statement01','statement02','statement03'],fees:fees.map(t=>({transaction:t,record:record(t)})),sale:{date:'2024-11-05',amount:4250000,sourceId:'bank:sale'},hold:{date:'2024-11-09',releaseDate:'2024-11-11',amount:3830000,sourceId:'bank:hold',releaseSourceId:'bank:release'},settlements:[{date:'2024-11-11',amount:-470000,sourceId:'bank:settle1'},{date:'2024-11-11',amount:750000,sourceId:'bank:settle2'},{date:'2024-11-11',amount:-750000,sourceId:'bank:settle3'},{date:'2024-11-11',amount:-3780000,sourceId:'bank:settle4'}],checks:[{date:'2024-11-05',balance:0},{date:'2024-11-10',balance:470000},{date:'2024-11-11',balance:50000}],evidence:'Provider claim and reports independently checked against the account statements.',reportingEvidence:'Income and reversals use the same category and reports require signed aggregation.'};
+  const api={...actual,sync:async()=>{},shutdown:async()=>{}};const d={connect:async()=>({api,rt}),readDashboard:async()=> (await actual.runQuery(actual.q('dashboard').select('*'))).data,updateWidget:async(runtime,w)=>runtime.send('dashboard-update-widget',w),snapshot,backup:async()=>'/backup',json:async()=>{},requireRun:async()=>ledger,readState:async()=>ledger,save:async x=>{ledger=x}};
+  const preview=await reconstructHeldRefund(p,false,d);d.expectedPlan=preview.planHash;const result=await reconstructHeldRefund(p,true,d);assert.equal(result.verified,true);
+  const after=await snapshot();assert.equal(after.accounts.find(a=>a.id===result.holdingId).closed,true);assert.equal(after.balances[result.holdingId],0);assert.equal(after.balances[wallet],before.balances[wallet]);
+  const economic=after.transactions.filter(t=>[p.sale.sourceId,...p.settlements.map(x=>x.sourceId)].includes(t.imported_id));assert.equal(economic.reduce((n,x)=>n+x.amount,0),0);assert(economic.every(t=>t.category===result.categoryId));const dashboard=await d.readDashboard();const targetWidgets=dashboard.filter(w=>['cash-flow-card','spending-card'].includes(w.type)||(w.type==='summary-card'&&(w.meta?.conditions??[]).some(c=>c.field==='amount'&&['gt','lt'].includes(c.op))));assert(targetWidgets.length>=2,'Offline dashboard needs affected widgets');for(const w of targetWidgets)assert(w.meta.conditions.some(c=>c.field==='category'&&c.op==='isNot'&&c.value===result.categoryId));
+  const retry=await reconstructHeldRefund(p,true,d);assert.equal(retry.action,'existing');
+ }finally{try{await actual.shutdown()}catch{}await rm(tmp,{recursive:true,force:true})}
+});
