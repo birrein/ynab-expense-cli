@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-// Exercise the actual CLI paths with an isolated in-memory API, never Keychain/Actual.
+// Exercise the native TypeScript CLI with an isolated in-memory API, never Keychain/Actual.
 async function cliCase({mode='plan',dropNotes=false,duplicate=false,existing=false,split=false,reserved=false,paired=false,removeCommit=false,pairedStatus='registered-pending-category',statementStatus=null},check){
  const root=await mkdtemp(join(tmpdir(),'actual-note-creation-'));
  try{
@@ -31,12 +31,18 @@ async function cliCase({mode='plan',dropNotes=false,duplicate=false,existing=fal
    export async function sync(){}
    export async function shutdown(){}
   `);
-  let source=await readFile(new URL('./actual-daily.mjs',import.meta.url),'utf8');
+  let source=await readFile(new URL('./actual-daily-operations.mjs',import.meta.url),'utf8');
   for(const file of ['actual-daily-policy.mjs','actual-transaction-notes.mjs','actual-note-tags.mjs','actual-historical-tags.mjs','actual-marketplace-sale-transfer.mjs','actual-linked-refund-category.mjs','actual-partial-account-migration.mjs','actual-uber-mixed-component.mjs','actual-statement-fx-expense.mjs','actual-statement-credit.mjs'])source=source.replaceAll("'./"+file+"'",JSON.stringify(new URL('./'+file,import.meta.url).href));
   source=source.replace(/const apiPath=.*?;/,`const apiPath=${JSON.stringify(api)};`).replace(/const token=execFileSync[^\n]+/,"const token='isolated-test';");
-  const cli=join(root,'cli.mjs');await writeFile(cli,source);
-  const args=[cli,mode,'--file',join(root,'candidate.json'),...(mode==='apply'||(mode==='remove'&&removeCommit)?['--commit','--run-id','run']:[])];
-  const result=spawnSync(process.execPath,args,{encoding:'utf8',env:{...process.env,ACTUAL_DAILY_DIR:root}});
+  const cliDir=join(root,'cli');
+  const runtimeDir=join(cliDir,'actual-runtime');
+  await mkdir(runtimeDir,{recursive:true});
+  await writeFile(join(runtimeDir,'package.json'),await readFile(new URL('./actual-runtime/package.json',import.meta.url)));
+  await writeFile(join(cliDir,'actual-daily-operations.mjs'),source);
+  await writeFile(join(runtimeDir,'actual-daily.ts'),await readFile(new URL('./actual-runtime/actual-daily.ts',import.meta.url)));
+  await writeFile(join(runtimeDir,'actual-daily-dispatcher.ts'),await readFile(new URL('./actual-runtime/actual-daily-dispatcher.ts',import.meta.url)));
+  const args=['--file',join(root,'candidate.json'),...(mode==='apply'||(mode==='remove'&&removeCommit)?['--commit','--run-id','run']:[])];
+  const result=spawnSync(process.execPath,[join(runtimeDir,'actual-daily.ts'),mode,...args],{encoding:'utf8',env:{...process.env,ACTUAL_DAILY_DIR:root}});
   await check(result,JSON.parse(await readFile(join(root,'state.json'),'utf8')),state);
  }finally{await rm(root,{recursive:true,force:true});}
 }
