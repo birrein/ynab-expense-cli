@@ -129,7 +129,7 @@ for(const kind of ['notes','tag','prefix'])test(`CLI ${kind} rejects missing/for
   const {p,state}=(kind==='tag'?tagFixture:kind==='prefix'?prefixFixture:fixture)();const file=join(root,'candidate.json'),statePath=join(root,'state.json');
   await writeFile(file,JSON.stringify(p));await writeFile(statePath,JSON.stringify(state));
   const original=await readFile(statePath,'utf8');
-  const cli=new URL('./actual-daily.mjs',import.meta.url).pathname;
+  const cli=new URL('./actual-runtime/actual-daily.ts',import.meta.url).pathname;
   const run=(...args)=>spawnSync(process.execPath,[cli,'apply','--file',file,...args],{encoding:'utf8',env:{...process.env,ACTUAL_DAILY_DIR:root}});
   for(const args of [[],['--commit'],['--commit','--run-id','foreign']]){
    const r=run(...args);assert.equal(r.status,1);assert.match(r.stderr,/commit required|Run lease missing/);

@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-const script=new URL('./actual-daily.mjs',import.meta.url).pathname;
+const script=new URL('./actual-runtime/actual-daily.ts',import.meta.url).pathname;
 test('pending owned transfer posting correction blocks financial commands before connection',async()=>{
  const root=await mkdtemp(join(tmpdir(),'actual-pending-owned-posting-'));
  try{await writeFile(root+'/state.json',JSON.stringify({activeRun:{id:'lease'},ownedTransferPostingDateCorrections:{origin:{status:'pending'}}}));const file=root+'/candidate.json';await writeFile(file,'{}');for(const args of [['remove','--file',file,'--run-id','lease','--commit'],['apply','--file',file,'--run-id','lease','--commit'],['adopt-budgets','--commit']]){const r=spawnSync(process.execPath,[script,...args],{encoding:'utf8',env:{...process.env,ACTUAL_DAILY_DIR:root}});assert.notEqual(r.status,0);assert.match(r.stderr,/Pending owned transfer posting date correction/)}}finally{await rm(root,{recursive:true})}
