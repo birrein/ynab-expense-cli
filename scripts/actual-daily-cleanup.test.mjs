@@ -29,17 +29,29 @@ for (const failure of ['', 'init', 'download', 'query', 'shutdown']) {
     export async function getSchedules() { return []; }
     export async function shutdown() { if(failure==='shutdown') throw Error('shutdown failed'); await writeFile(dir+'/closed','yes'); }
    `);
-   const original = await readFile(new URL('./actual-daily.mjs', import.meta.url), 'utf8');
+   const original = await readFile(new URL('./actual-daily-operations.mjs', import.meta.url), 'utf8');
    const source = original
     .replace("'./actual-daily-policy.mjs'", JSON.stringify(new URL('./actual-daily-policy.mjs', import.meta.url).href))
+    .replaceAll("'./actual-runtime/adapters/daily-state-reader.ts'", JSON.stringify(new URL('./actual-runtime/adapters/daily-state-reader.ts', import.meta.url).href))
+    .replaceAll("'./actual-runtime/adapters/santiago-calendar-clock.ts'", JSON.stringify(new URL('./actual-runtime/adapters/santiago-calendar-clock.ts', import.meta.url).href))
     .replace("'./actual-transaction-notes.mjs'", JSON.stringify(new URL('./actual-transaction-notes.mjs', import.meta.url).href))
     .replace("'./actual-note-tags.mjs'", JSON.stringify(new URL('./actual-note-tags.mjs', import.meta.url).href))
     .replace("'./actual-historical-tags.mjs'", JSON.stringify(new URL('./actual-historical-tags.mjs', import.meta.url).href))
     .replaceAll("'./actual-statement-credit.mjs'", JSON.stringify(new URL('./actual-statement-credit.mjs', import.meta.url).href))
     .replace(/const apiPath=.*?;/, `const apiPath=${JSON.stringify(api)};`)
     .replace(/const token=execFileSync[^\n]+/, "const token='isolated-test';");
-   const cli = join(root, 'cli.mjs'); await writeFile(cli, source);
-   const result = spawnSync(process.execPath, [cli, 'snapshot', '--currency', 'CLP'], {encoding:'utf8',env:{...process.env,ACTUAL_DAILY_DIR:root}});
+   const cliDir = join(root, 'cli');
+   const runtimeDir = join(cliDir, 'actual-runtime');
+   await mkdir(runtimeDir, {recursive:true});
+   const entry = (await readFile(new URL('./actual-runtime/actual-daily.ts', import.meta.url), 'utf8'))
+    .replaceAll("'./application/get-status.ts'", JSON.stringify(new URL('./actual-runtime/application/get-status.ts', import.meta.url).href))
+    .replaceAll("'./adapters/daily-state-reader.ts'", JSON.stringify(new URL('./actual-runtime/adapters/daily-state-reader.ts', import.meta.url).href))
+    .replaceAll("'./adapters/santiago-calendar-clock.ts'", JSON.stringify(new URL('./actual-runtime/adapters/santiago-calendar-clock.ts', import.meta.url).href));
+   await writeFile(join(runtimeDir, 'package.json'), await readFile(new URL('./actual-runtime/package.json', import.meta.url)));
+   await writeFile(join(cliDir, 'actual-daily-operations.mjs'), source);
+   await writeFile(join(runtimeDir, 'actual-daily.ts'), entry);
+   await writeFile(join(runtimeDir, 'actual-daily-dispatcher.ts'), await readFile(new URL('./actual-runtime/actual-daily-dispatcher.ts', import.meta.url)));
+   const result = spawnSync(process.execPath, [join(runtimeDir, 'actual-daily.ts'), 'snapshot', '--currency', 'CLP'], {encoding:'utf8',env:{...process.env,ACTUAL_DAILY_DIR:root}});
    assert.equal(result.status, failure ? 1 : 0, result.stderr);
    if(failure) assert.match(result.stderr, new RegExp(failure+' failed'));
    const ownClients = (await readdir(root)).filter(x=>x.startsWith('client-') && x!=='client-other-run');

@@ -1,11 +1,19 @@
 {
   "name": "actual-daily-runtime",
   "private": true,
+  "type": "module",
   "description": "Pinned Actual API for the daily expense adapter",
   "engines": {
-    "node": "22.20.0"
+    "node": "24.22.3"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@actual-app/api": "26.10.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "typescript": "5.9.3"
   }
 }

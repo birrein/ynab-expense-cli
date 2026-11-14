@@ -1,25 +1,25 @@
-#!/usr/bin/env node
-// Operational Actual adapter. Financial payloads and credentials stay outside Git.
+// Internal operations for the Actual CLI. Financial payloads and credentials stay outside Git.
 import { mkdir, mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
+import { dailyRoot as root, dailyStatePath as statePath, readDailyState } from './actual-runtime/adapters/daily-state-reader.ts';
+import { santiagoCalendarClock } from './actual-runtime/adapters/santiago-calendar-clock.ts';
 import { prefixNoteTags } from './actual-note-tags.mjs';
 import { amendTransactionNotes } from './actual-transaction-notes.mjs';
 import { amendHistoricalTag } from './actual-historical-tags.mjs';
 import { pendingStatementCreditConflict, reservedStatementCreditConflict } from './actual-statement-credit.mjs';
 import { BUDGETS, candidateImportedId, candidateSourceNotes, candidateTransactionNotes, validateRefund, validateCandidate, classifyCandidate, verifyTransaction, validateResolution, nextWindows, locateCreatedTransaction, applySimplePayeeCategoryRule, validateInstallmentPlan, classifyInstallmentPlan, validateRemainingInstallmentPlan, classifyRemainingInstallmentPlan, validateRemainingInstallmentsPlan, classifyRemainingInstallmentsPlan, installmentScheduleName, validateScheduleAmendment, classifyScheduleAmendment, validateScheduleNotesAmendment, classifyScheduleNotesAmendment } from './actual-daily-policy.mjs';
-const root=process.env.ACTUAL_DAILY_DIR||'/Users/birrein/Actual-pilot/daily', statePath=root+'/state.json';
 const apiPath=new URL('./actual-runtime/node_modules/@actual-app/api/dist/index.js',import.meta.url).href;
-const [command,...args]=process.argv.slice(2);
+let args=[];
 // Only directories created by this process are eligible for successful-run cleanup.
 const temporaryClients=[];
 const option=k=>{const i=args.indexOf(k);return i<0?null:args[i+1];};
-const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const today=()=>santiagoCalendarClock.today();
 const readJSON=async p=>JSON.parse(await readFile(p,'utf8'));
 const json=async(p,v)=>writeFile(p,JSON.stringify(v,null,2)+'\n',{mode:0o600});
 await mkdir(root,{recursive:true,mode:0o700});
-const state=()=>readJSON(statePath);
+const state=()=>readDailyState();
 async function save(s){const p=statePath+'.'+randomUUID();await json(p,s);await rename(p,statePath);}
 async function locked(fn){
  const lock=root+'/write.lock';
@@ -463,26 +463,25 @@ async function removeFinancial(c,commit){
   return {action:'delete',label:'Actual/Ignore',id:c.transactionId,verified:true,backup:dir};
  }finally{await api.shutdown();}
 }
-async function main(){
- if(command==='status'){const s=await state();return {state:s,windows:nextWindows(today(),s)};}
- if(command==='begin-run')return locked(async()=>{const s=await state();assert(!s.activeRun,'An execution is already active; inspect it before recovery');s.activeRun={id:randomUUID(),startedAt:new Date().toISOString(),windows:nextWindows(today(),s)};await save(s);return s.activeRun;});
- if(command==='finish-run')return locked(async()=>{
+function withArgs(handler){return async suppliedArgs=>{args=[...suppliedArgs];return handler();};}
+export const commandHandlers={
+ 'begin-run':withArgs(async()=>locked(async()=>{const s=await state();assert(!s.activeRun,'An execution is already active; inspect it before recovery');s.activeRun={id:randomUUID(),startedAt:new Date().toISOString(),windows:nextWindows(today(),s)};await save(s);return s.activeRun;})),
+ 'finish-run':withArgs(async()=>locked(async()=>{
   const s=await requireRun(),report=await readJSON(option('--file'));assert(Array.isArray(report.reviewed),'Explicit reviewed windows required');
   for(const kind of report.reviewed){assert(['daily','backfill'].includes(kind));const w=s.activeRun.windows[kind];assert(w,'No window for '+kind);assert(report.completeSearch===true,'Search pagination must be complete');s[kind==='daily'?'dailyThrough':'backfillThrough']=w.to;}
   s.runs.push({...s.activeRun,finishedAt:new Date().toISOString(),report});s.activeRun=null;await save(s);return {saved:true};
- });
- if(['plan','apply'].includes(command)){
-  const c=await readJSON(option('--file'));if(command==='apply'){assert(args.includes('--commit'),'--commit required');return locked(()=>financial(c,true));}return financial(c,false);
- }
- if(command==='remove'){
+ })),
+ plan:withArgs(async()=>{const c=await readJSON(option('--file'));return financial(c,false);}),
+ apply:withArgs(async()=>{const c=await readJSON(option('--file'));assert(args.includes('--commit'),'--commit required');return locked(()=>financial(c,true));}),
+ remove:withArgs(async()=>{
   const c=await readJSON(option('--file'));if(args.includes('--commit')){assert(option('--run-id'),'--run-id required');return locked(async()=>{const l=await requireRun(),m=await import('./actual-statement-fx-expense.mjs');assertNoPendingCrossCurrencyDebt(l);assert(!Object.values(l.uberSplitDuplicates??{}).some(x=>x?.status==='pending'),'Pending Uber split retirement requires investigation');assert(!m.hasPendingFxExpenseMigration(l),'Pending FX expense migration requires investigation');assert(!m.migrationSourceConflict(c,l),'Source belongs to completed cross-budget expense migration');if(Object.keys(l.mixedUberCashSplits??{}).length)assert(!(await import('./actual-uber-mixed-split.mjs')).hasPendingMixedSplit(l),'Pending mixed Uber Cash split requires investigation');assert(!(await import('./actual-uber-mixed-component.mjs')).hasPendingMixedComponent(l),'Pending mixed Uber Cash component requires investigation');assert(!Object.values(l.crossAccountRefundOverlaps??{}).some(x=>x?.status==='pending'),'Pending cross-account refund overlap requires investigation');assert(!Object.values(l.providerRideDedups??{}).some(x=>x?.status==='pending'),'Pending provider ride retirement requires investigation');assert(!Object.values(l.uberCashReconstructions??{}).some(x=>x?.status==='pending'),'Pending Uber Cash reconstruction requires investigation');assert(!(await import('./actual-partial-account-migration.mjs')).hasPendingPartialMigration(l),'Pending historical account migration requires investigation');return removeFinancial(c,true)});}if((await import('./actual-statement-fx-expense.mjs')).migrationSourceConflict(c,await state()))return {action:'review',reason:'Source or transaction belongs to completed cross-budget expense migration'};return removeFinancial(c,false);
- }
- if(command==='inventory'){const{api}=await connect();try{return await api.getBudgets();}finally{await api.shutdown();}}
- if(command==='snapshot'){
+ }),
+ inventory:withArgs(async()=>{const{api}=await connect();try{return await api.getBudgets();}finally{await api.shutdown();}}),
+ snapshot:withArgs(async()=>{
   const currency=option('--currency');assert(BUDGETS[currency]);const{api}=await connect(BUDGETS[currency].syncId);
   try{const s=await snapshot(api),path=root+'/snapshot-'+currency+'-'+Date.now()+'.json';await json(path,s);return {path,accounts:s.accounts,categories:s.categories,transactions:s.transactions.length};}finally{await api.shutdown();}
- }
- if(command==='adopt-budgets')return locked(async()=>{
+ }),
+ 'adopt-budgets':withArgs(async()=>locked(async()=>{
   assert(args.includes('--commit'),'--commit required');
   const pendingState=await state();if(Object.keys(pendingState.crossAccountGmailDuplicates??{}).length)assert(!(await import('./actual-cross-account-gmail-dedup.mjs')).hasPendingGmailDedup(pendingState),'Pending Gmail duplicate requires investigation');assert(!Object.values(pendingState.uberSplitDuplicates??{}).some(x=>x?.status==='pending'),'Pending Uber split retirement requires investigation');assert(!Object.values(pendingState.crossAccountRefundOverlaps??{}).some(x=>x?.status==='pending'),'Pending cross-account refund overlap requires investigation');assert(!Object.values(pendingState.providerRideDedups??{}).some(x=>x?.status==='pending'),'Pending provider ride retirement requires investigation');assert(!Object.values(pendingState.uberCashReconstructions??{}).some(x=>x?.status==='pending'),'Pending Uber Cash reconstruction requires investigation');
   assertNoPendingCrossCurrencyDebt(pendingState);
@@ -500,17 +499,12 @@ async function main(){
    const fresh=await connect(t.syncId);
    try{equal(await snapshot(fresh.api),before,'Renaming changed financial data');const b=(await fresh.api.getBudgets()).find(b=>b.groupId===t.syncId);assert.equal(b.name,t.name);results.push({name:t.name,syncId:t.syncId,backup:dir,verified:true});}finally{await fresh.api.shutdown();}
   }return results;
- });
- throw new Error('Commands: inventory, adopt-budgets --commit, snapshot --currency CLP|USD, status, begin-run, plan --file JSON, apply --file JSON --run-id ID --commit, remove --file JSON [--run-id ID --commit], finish-run --file JSON --run-id ID');
-}
-try{
- const result=await main();
- // main() resolves only after all API shutdowns and financial readback checks succeed.
- // On failure, retain every client directory from this command for diagnosis.
+ }))
+};
+
+export async function cleanupTemporaryClients(){
  for(const dataDir of temporaryClients){
   try{await rm(dataDir,{recursive:true});}
   catch(e){console.error('Warning: temporary client cleanup failed for '+dataDir+': '+e.message);}
  }
- // A cleanup warning must not turn a verified financial write into a retryable failure.
- console.log(JSON.stringify(result,null,2));
-}catch(e){console.error(e.message);process.exitCode=1;}
+}

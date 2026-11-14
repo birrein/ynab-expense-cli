@@ -29,7 +29,7 @@ func runActualAdapter(ctx context.Context, args []string, out, errout io.Writer)
 		if !ok {
 			return fmt.Errorf("cannot locate Actual adapter; set ACTUAL_ADAPTER_PATH")
 		}
-		path = filepath.Join(filepath.Dir(file), "..", "..", "scripts", "actual-daily.mjs")
+		path = filepath.Join(filepath.Dir(file), "..", "..", "scripts", "actual-runtime", "actual-daily.ts")
 	}
 	argv := append([]string{path}, args...)
 	proc := exec.CommandContext(ctx, "node", argv...)

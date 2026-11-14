@@ -45,7 +45,7 @@ test('a pending expense correction blocks an unrelated CLI write before connecti
  const dir=mkdtempSync(join(tmpdir(),'actual-pending-expense-'));try{
   writeFileSync(join(dir,'state.json'),JSON.stringify({activeRun:{id:'test-run'},expenseStatementDateCorrections:{example:{status:'pending'}}}));
   const candidate=join(dir,'candidate.json');writeFileSync(candidate,'{}');
-  const result=spawnSync(process.execPath,[fileURLToPath(new URL('./actual-daily.mjs',import.meta.url)),'apply','--file',candidate,'--run-id','test-run','--commit'],{env:{...process.env,ACTUAL_DAILY_DIR:dir},encoding:'utf8'});
+  const result=spawnSync(process.execPath,[fileURLToPath(new URL('./actual-runtime/actual-daily.ts',import.meta.url)),'apply','--file',candidate,'--run-id','test-run','--commit'],{env:{...process.env,ACTUAL_DAILY_DIR:dir},encoding:'utf8'});
   assert.notEqual(result.status,0);assert.match(result.stderr,/Pending expense statement date correction requires investigation/);assert.equal(existsSync(join(dir,'write.lock')),false);
  }finally{rmSync(dir,{recursive:true,force:true})}
 });
