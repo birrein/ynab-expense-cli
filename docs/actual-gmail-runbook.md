@@ -6,7 +6,7 @@ Usar exclusivamente Finanzas CLP (`5c58e53d-be34-4968-b944-f5b3b8b3b874`) y Fina
 
 Servidor http://127.0.0.1:5006, Actual sync-server 26.10.0, Node 22.20.0. LaunchAgent `cl.birrein.actual-server`: inicia al entrar a macOS y reinicia tras fallo. No es servicio previo al login; el Mac debe estar encendido y disponible. No se configuró HTTPS remoto ni se deshabilitó el reposo. Datos originales en `/Users/birrein/Actual-pilot/{data,server-files,user-files}`. Logs en `~/Library/Logs/Actual/`.
 
-El adaptador diario usa su propia dependencia `@actual-app/api` 26.10.0, fijada en `scripts/actual-runtime/package.json` y `package-lock.json`; usa dependencias instaladas en el M1 y no depende del CLI global. Finanzas CLP ya contiene las 60 migraciones que reconoce esa API. Para instalar exactamente el runtime del adaptador: activar Node 22.20.0 con nvm y ejecutar `npm ci --prefix scripts/actual-runtime --no-audit --no-fund`. Esto no actualiza el servidor Actual ni migra el presupuesto remoto. `ACTUAL_SERVER_URL` permite dirigir una comprobación a un proxy local de solo lectura; por defecto sigue siendo `http://127.0.0.1:5006`.
+El adaptador diario usa su propia dependencia `@actual-app/api` 26.10.0, fijada en `scripts/actual-runtime/package.json` y `package-lock.json`; usa dependencias instaladas en el M1 y no depende del CLI global. Finanzas CLP ya contiene las 60 migraciones que reconoce esa API. Para instalar exactamente el runtime del adaptador: activar Node 24.22.3 con nvm y ejecutar `npm ci --prefix scripts/actual-runtime --no-audit --no-fund`. Esto no actualiza el servidor Actual ni migra el presupuesto remoto. `ACTUAL_SERVER_URL` permite dirigir una comprobación a un proxy local de solo lectura; por defecto sigue siendo `http://127.0.0.1:5006`.
 
 En el M1, el servidor 26.10.0 está en `/Users/birrein/Actual-pilot/server-runtime`; el respaldo diario usa la API en `/Users/birrein/Actual-pilot/api-runtime` y se ejecuta a las 08:30 mediante `cl.birrein.actual-backup`. La instalación anterior de dependencias del adaptador se conserva en `scripts/actual-runtime/node_modules/.pre-m1-original` y no debe ejecutarse. No activar automatizaciones de conciliación hasta verificar sus estados y host.
 
@@ -15,7 +15,7 @@ El adaptador obtiene el token desde el Llavero, servicio `actual-budget-session-
 ## Inicio de cada ejecución
 
 1. Leer este documento, las instrucciones del repo y el AGENTS.md del vault. Usar la skill `actual-gmail-reconciliation` en `/Users/birrein/.codex/skills/actual-gmail-reconciliation/SKILL.md` como guía de evidencia y operación: el destino es exclusivamente Actual Budget.
-2. `source /Users/birrein/.nvm/nvm.sh` y `nvm use 22.20.0`. Ejecutar `node scripts/actual-daily.mjs status`, comprobar HTTP local y después `begin-run`. Guardar el ID devuelto.
+2. `source /Users/birrein/.nvm/nvm.sh` y `nvm use 24.22.3`. Ejecutar `node scripts/actual-runtime/actual-daily.ts status`, comprobar HTTP local y después `begin-run`. Guardar el ID devuelto.
 3. Estado autoritativo: `/Users/birrein/Actual-pilot/daily/state.json`, no la memoria antigua YNAB. El inicio calcula ventanas independientes: diario hasta ayer y recuperación histórica de hasta siete días. No ampliar la ventana histórica ni reabrir diferencias antiguas aceptadas sin evidencia nueva.
 4. Si hay lease activo, no robarlo. Revisar la ejecución y comunicar el bloqueo. Tras comprobar que terminó la ejecución anterior, el operador puede cerrar su lease con `finish-run`, su ID y un reporte `{"reviewed":[],"completeSearch":false,"reason":"recuperación de ejecución interrumpida"}`; no avanza fechas. Nunca borrar locks ajenos automáticamente.
 
@@ -61,8 +61,8 @@ Para gastos manuales explícitamente confirmados por el usuario, usar el mismo p
 
 Para una devolución efectivamente abonada, conservar el cargo original y crear un candidato con `refundOf:"ID Actual original"`, importe positivo y una fuente propia del abono, distinta de la fuente del cargo. Debe haber comprobante y evidencia de liquidación, misma cuenta/moneda/categoría y fecha no anterior a la compra. Solo se admiten devoluciones de gastos simples categorizados; el acumulado vinculado no puede superar el cargo. El adaptador conserva `refundOf` en notas y ledger y aplica las mismas garantías de plan, backup, sync, deduplicación y readback. Una autorización o solicitud de devolución aún no liquidada permanece en Review.
 
-1. `node scripts/actual-daily.mjs plan --file /ruta/candidato.json`.
-2. Solo si la evidencia y el plan coinciden: `node scripts/actual-daily.mjs apply --file /ruta/candidato.json --run-id ID --commit`.
+1. `node scripts/actual-runtime/actual-daily.ts plan --file /ruta/candidato.json`.
+2. Solo si la evidencia y el plan coinciden: `node scripts/actual-runtime/actual-daily.ts apply --file /ruta/candidato.json --run-id ID --commit`.
 3. Se respalda ZIP antes de modificar y se verifica descargando otra copia desde el servidor: fuente, categoría, monto, cuenta, invariantes y saldos. La API puede imprimir logs antes del JSON; no asumir stdout íntegro como JSON.
 4. La misma fuente se verifica, no se vuelve a insertar. Coincidencia cuenta/importe a tres días de distancia sin fuente reconocida requiere revisión; no borrar ni fusionar automáticamente. Ante fallo después de escritura, revisar fuente/backup antes de reintentar, jamás cambiar el sourceId para forzar un alta.
    Excepción acotada: si el usuario confirma que son cargos distintos y los avisos bancarios muestran horas de compra diferentes, cada candidato puede incluir `distinctPurchaseReason` explícito para superar ese control; nunca usarlo para repetir una misma fuente, fusionar cargos o ignorar una discrepancia.
@@ -76,8 +76,8 @@ Para una devolución efectivamente abonada, conservar el cargo original y crear 
 El candidato privado debe contener `currency` (CLP/USD), `transactionId`, `account`, `payeeId`, `date`, `amount` (centésimas negativas), `category`, `sourceId`, `sourceIds`, `oldNotes` (nota completa exacta del snapshot), `oldText`, `newText` y `evidence`; `sourceType` puede ser `gmail` (por defecto) o `manual`. Usar IDs actuales verificados y conservar todas las fuentes originales. `oldText` debe aparecer una sola vez. La sustitución solo afecta ese fragmento literal; no puede intersectar enlaces, hashtags o metadata de fuentes, ni introducirlos o insertar saltos de línea. El plan muestra `oldNotes` y `newNotes` completos. No usar texto inventado ni inferir conceptos por el nombre del comercio.
 
 ```sh
-node scripts/actual-daily.mjs plan --file /ruta/privada/enmienda-notas.json
-node scripts/actual-daily.mjs apply --file /ruta/privada/enmienda-notas.json --run-id ID --commit
+node scripts/actual-runtime/actual-daily.ts plan --file /ruta/privada/enmienda-notas.json
+node scripts/actual-runtime/actual-daily.ts apply --file /ruta/privada/enmienda-notas.json --run-id ID --commit
 ```
 
 Cada apply vuelve a verificar ID, cuenta, comercio, fecha, importe, categoría, fuentes, ledger y notas. Exige lease propio y lock libre, respalda ZIP y snapshot, guarda el candidato/evidencia en `notes-amendment.json` junto al respaldo, sincroniza y revalida antes de modificar únicamente `notes`. Después sincroniza y descarga mediante otro cliente, comparando todo el snapshot: solo pueden diferir las notas objetivo. Conserva fuentes, enlaces Gmail, hashtags, campos del movimiento, saldos y todos los datos ajenos. Solo tras verificar agrega `notesAmendments` a los registros originales del ledger; mantiene categorías, estados, respaldo original y marcadores diarios. No cambia etiquetas Gmail.
@@ -185,7 +185,7 @@ Consultar servicio con `launchctl print gui/$(id -u)/cl.birrein.actual-server`; 
 
 ## CLI Go y contabilización de cuota facturada
 
-El CLI Go ofrece `ynab-expense actual <operación> [argumentos]` y delega al mismo `scripts/actual-daily.mjs`, con la API oficial Node fijada; conserva lease, lock y destinos. Activar Node 22.20.0 con nvm. Si el ejecutable se mueve o compila con rutas recortadas, `ACTUAL_ADAPTER_PATH` puede apuntar al script real del repositorio. No suministrar tokens en argumentos.
+El CLI Go ofrece `ynab-expense actual <operación> [argumentos]` y delega a `scripts/actual-runtime/actual-daily.ts`, con la API oficial Node fijada; conserva lease, lock y destinos. Activar Node 24.22.3 con nvm. Si el ejecutable se mueve o compila con rutas recortadas, `ACTUAL_ADAPTER_PATH` puede apuntar al script real del repositorio. No suministrar tokens en argumentos.
 
 Para una cuota vencida respaldada por cartola, el candidato privado incluye `postInstallment:true`, `currency`, `account`, `scheduleId`, `ruleId`, `payee`, `date` (fecha de la programación), `amount`, `billedAmount` (centésimas negativas e igual a `amount`), `category`, `sourceId` estable por cartola y referencia bancaria, `statementMessageId` de Gmail, `notes` con procedencia original de la regla y `evidence`. Previsualizar con `ynab-expense actual plan --file ...`; solo aplicar con `ynab-expense actual apply --file ... --run-id ... --commit` si identidad, cuota, categoría y monto coinciden. La operación enlaza la transacción a la programación; Actual la considera pagada sin activar `posts_transaction`. Reintentar únicamente el candidato exacto; verifica/repara su propio vínculo sin nueva alta. Una diferencia de monto, categoría, fuente o posible duplicado detiene la operación para Review. El ZIP y candidato se conservan privados y se verifica por descarga independiente.
 
