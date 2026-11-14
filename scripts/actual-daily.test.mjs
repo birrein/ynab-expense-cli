@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -94,4 +94,73 @@ test('pending cross-account Gmail duplicate blocks financial mutations before co
 test('retired Gmail sources are reserved in expense and cashflow operations',async()=>{
  const root=await mkdtemp(join(tmpdir(),'actual-reserved-gmail-dedup-'));
  try{await writeFile(root+'/state.json',JSON.stringify({crossAccountGmailDuplicates:{x:{status:'complete',candidate:{sourceIds:['aaaa1111'],oldTransaction:{id:'old'},retainedTransaction:{id:'new'}}}}}));const file=root+'/candidate.json';for(const [command,c] of [['plan',{sourceId:'aaaa1111'}],['plan',{cashflow:true,sourceIds:['aaaa1111']}],['remove',{sourceIds:['aaaa1111']}],['remove',{transactionId:'new'}],['plan',{transactionId:'old'}]]){await writeFile(file,JSON.stringify(c));const r=spawnSync(process.execPath,[script,command,'--file',file],{encoding:'utf8',env:{...process.env,ACTUAL_DAILY_DIR:root}});assert.equal(r.status,0,r.stderr);assert.equal(JSON.parse(r.stdout).action,'review');assert.match(JSON.parse(r.stdout).reason,/Gmail duplicate/)}}finally{await rm(root,{recursive:true})}
+});
+
+async function compatibilityFixture(t) {
+ const parent=await mkdtemp(join(tmpdir(),'actual-daily-contract-'));
+ const root=join(parent,'daily');
+ t.after(()=>rm(parent,{recursive:true,force:true}));
+ const run=(...args)=>spawnSync(process.execPath,[script,...args],{encoding:'utf8',env:{ACTUAL_DAILY_DIR:root}});
+ return {parent,root,run};
+}
+
+const commandUsage='Commands: inventory, adopt-budgets --commit, snapshot --currency CLP|USD, status, begin-run, plan --file JSON, apply --file JSON --run-id ID --commit, remove --file JSON [--run-id ID --commit], finish-run --file JSON --run-id ID';
+
+test('missing command prints usage and creates only the isolated state root',async t=>{
+ const fixture=await compatibilityFixture(t);
+ const result=fixture.run();
+ assert.equal(result.status,1);
+ assert.equal(result.stdout,'');
+ assert.equal(result.stderr,commandUsage+'\n');
+ assert.deepEqual(await readdir(fixture.root),[]);
+});
+
+test('unknown command prints usage and creates only the isolated state root',async t=>{
+ const fixture=await compatibilityFixture(t);
+ const result=fixture.run('unknown-command');
+ assert.equal(result.status,1);
+ assert.equal(result.stdout,'');
+ assert.equal(result.stderr,commandUsage+'\n');
+ assert.deepEqual(await readdir(fixture.root),[]);
+});
+
+test('status preserves valid state and emits the expected JSON streams without writing files',async t=>{
+ const fixture=await compatibilityFixture(t);
+ const state={dailyStart:'2000-01-10',dailyThrough:'2000-01-10',backfillThrough:'2000-01-01',extraState:{preserved:true}};
+ const stateBytes=JSON.stringify(state);
+ await mkdir(fixture.root,{recursive:true});
+ await writeFile(join(fixture.root,'state.json'),stateBytes);
+ const result=fixture.run('status');
+ assert.equal(result.status,0,result.stderr);
+ assert.equal(result.stderr,'');
+ const normalized=result.stdout.replace(/("to": )"\d{4}-\d{2}-\d{2}"/,'$1"<today-minus-one>"');
+ const expected=JSON.stringify({state,windows:{daily:{from:'2000-01-11',to:'<today-minus-one>'},backfill:{from:'2000-01-02',to:'2000-01-08'}}},null,2)+'\n';
+ assert.equal(normalized,expected);
+ assert.match(result.stdout,/"to": "\d{4}-\d{2}-\d{2}"/);
+ assert.equal(await readFile(join(fixture.root,'state.json'),'utf8'),stateBytes);
+ assert.deepEqual(await readdir(fixture.root),['state.json']);
+});
+
+test('status with missing state reports ENOENT and leaves an empty isolated state root',async t=>{
+ const fixture=await compatibilityFixture(t);
+ const result=fixture.run('status');
+ assert.equal(result.status,1);
+ assert.equal(result.stdout,'');
+ assert.equal(result.stderr.replaceAll(fixture.root,'<root>'),"ENOENT: no such file or directory, open '<root>/state.json'\n");
+ assert.deepEqual(await readdir(fixture.root),[]);
+});
+
+test('apply without --commit fails before locking or changing scratch state',async t=>{
+ const fixture=await compatibilityFixture(t);
+ const stateBytes='{"marker":"unchanged"}';
+ await mkdir(fixture.root,{recursive:true});
+ await writeFile(join(fixture.root,'state.json'),stateBytes);
+ const candidate=join(fixture.parent,'candidate.json');
+ await writeFile(candidate,'{}');
+ const result=fixture.run('apply','--file',candidate);
+ assert.equal(result.status,1);
+ assert.equal(result.stdout,'');
+ assert.equal(result.stderr,'--commit required\n');
+ assert.equal(await readFile(join(fixture.root,'state.json'),'utf8'),stateBytes);
+ assert.deepEqual(await readdir(fixture.root),['state.json']);
 });
