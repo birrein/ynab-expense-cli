@@ -32,6 +32,8 @@ for (const failure of ['', 'init', 'download', 'query', 'shutdown']) {
    const original = await readFile(new URL('./actual-daily-operations.mjs', import.meta.url), 'utf8');
    const source = original
     .replace("'./actual-daily-policy.mjs'", JSON.stringify(new URL('./actual-daily-policy.mjs', import.meta.url).href))
+    .replaceAll("'./actual-runtime/adapters/daily-state-reader.ts'", JSON.stringify(new URL('./actual-runtime/adapters/daily-state-reader.ts', import.meta.url).href))
+    .replaceAll("'./actual-runtime/adapters/santiago-calendar-clock.ts'", JSON.stringify(new URL('./actual-runtime/adapters/santiago-calendar-clock.ts', import.meta.url).href))
     .replace("'./actual-transaction-notes.mjs'", JSON.stringify(new URL('./actual-transaction-notes.mjs', import.meta.url).href))
     .replace("'./actual-note-tags.mjs'", JSON.stringify(new URL('./actual-note-tags.mjs', import.meta.url).href))
     .replace("'./actual-historical-tags.mjs'", JSON.stringify(new URL('./actual-historical-tags.mjs', import.meta.url).href))
@@ -41,9 +43,13 @@ for (const failure of ['', 'init', 'download', 'query', 'shutdown']) {
    const cliDir = join(root, 'cli');
    const runtimeDir = join(cliDir, 'actual-runtime');
    await mkdir(runtimeDir, {recursive:true});
+   const entry = (await readFile(new URL('./actual-runtime/actual-daily.ts', import.meta.url), 'utf8'))
+    .replaceAll("'./application/get-status.ts'", JSON.stringify(new URL('./actual-runtime/application/get-status.ts', import.meta.url).href))
+    .replaceAll("'./adapters/daily-state-reader.ts'", JSON.stringify(new URL('./actual-runtime/adapters/daily-state-reader.ts', import.meta.url).href))
+    .replaceAll("'./adapters/santiago-calendar-clock.ts'", JSON.stringify(new URL('./actual-runtime/adapters/santiago-calendar-clock.ts', import.meta.url).href));
    await writeFile(join(runtimeDir, 'package.json'), await readFile(new URL('./actual-runtime/package.json', import.meta.url)));
    await writeFile(join(cliDir, 'actual-daily-operations.mjs'), source);
-   await writeFile(join(runtimeDir, 'actual-daily.ts'), await readFile(new URL('./actual-runtime/actual-daily.ts', import.meta.url)));
+   await writeFile(join(runtimeDir, 'actual-daily.ts'), entry);
    await writeFile(join(runtimeDir, 'actual-daily-dispatcher.ts'), await readFile(new URL('./actual-runtime/actual-daily-dispatcher.ts', import.meta.url)));
    const result = spawnSync(process.execPath, [join(runtimeDir, 'actual-daily.ts'), 'snapshot', '--currency', 'CLP'], {encoding:'utf8',env:{...process.env,ACTUAL_DAILY_DIR:root}});
    assert.equal(result.status, failure ? 1 : 0, result.stderr);

@@ -3,22 +3,23 @@ import { mkdir, mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promise
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
+import { dailyRoot as root, dailyStatePath as statePath, readDailyState } from './actual-runtime/adapters/daily-state-reader.ts';
+import { santiagoCalendarClock } from './actual-runtime/adapters/santiago-calendar-clock.ts';
 import { prefixNoteTags } from './actual-note-tags.mjs';
 import { amendTransactionNotes } from './actual-transaction-notes.mjs';
 import { amendHistoricalTag } from './actual-historical-tags.mjs';
 import { pendingStatementCreditConflict, reservedStatementCreditConflict } from './actual-statement-credit.mjs';
 import { BUDGETS, candidateImportedId, candidateSourceNotes, candidateTransactionNotes, validateRefund, validateCandidate, classifyCandidate, verifyTransaction, validateResolution, nextWindows, locateCreatedTransaction, applySimplePayeeCategoryRule, validateInstallmentPlan, classifyInstallmentPlan, validateRemainingInstallmentPlan, classifyRemainingInstallmentPlan, validateRemainingInstallmentsPlan, classifyRemainingInstallmentsPlan, installmentScheduleName, validateScheduleAmendment, classifyScheduleAmendment, validateScheduleNotesAmendment, classifyScheduleNotesAmendment } from './actual-daily-policy.mjs';
-const root=process.env.ACTUAL_DAILY_DIR||'/Users/birrein/Actual-pilot/daily', statePath=root+'/state.json';
 const apiPath=new URL('./actual-runtime/node_modules/@actual-app/api/dist/index.js',import.meta.url).href;
 let args=[];
 // Only directories created by this process are eligible for successful-run cleanup.
 const temporaryClients=[];
 const option=k=>{const i=args.indexOf(k);return i<0?null:args[i+1];};
-const today=()=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Santiago',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+const today=()=>santiagoCalendarClock.today();
 const readJSON=async p=>JSON.parse(await readFile(p,'utf8'));
 const json=async(p,v)=>writeFile(p,JSON.stringify(v,null,2)+'\n',{mode:0o600});
 await mkdir(root,{recursive:true,mode:0o700});
-const state=()=>readJSON(statePath);
+const state=()=>readDailyState();
 async function save(s){const p=statePath+'.'+randomUUID();await json(p,s);await rename(p,statePath);}
 async function locked(fn){
  const lock=root+'/write.lock';
@@ -464,7 +465,6 @@ async function removeFinancial(c,commit){
 }
 function withArgs(handler){return async suppliedArgs=>{args=[...suppliedArgs];return handler();};}
 export const commandHandlers={
- status:withArgs(async()=>{const s=await state();return {state:s,windows:nextWindows(today(),s)};}),
  'begin-run':withArgs(async()=>locked(async()=>{const s=await state();assert(!s.activeRun,'An execution is already active; inspect it before recovery');s.activeRun={id:randomUUID(),startedAt:new Date().toISOString(),windows:nextWindows(today(),s)};await save(s);return s.activeRun;})),
  'finish-run':withArgs(async()=>locked(async()=>{
   const s=await requireRun(),report=await readJSON(option('--file'));assert(Array.isArray(report.reviewed),'Explicit reviewed windows required');
